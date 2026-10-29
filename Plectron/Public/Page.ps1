@@ -72,6 +72,8 @@ function New-PlxTable {
     Fixed rows, evaluated once when the page loads.
     .PARAMETER Property
     Columns to show (default: the objects' default display properties, or all).
+    .PARAMETER Key
+    A property that identifies a row (e.g. Id). Selected rows stay selected across refreshes.
     #>
     [CmdletBinding(DefaultParameterSetName = 'ScriptBlock')]
     param(
@@ -79,12 +81,13 @@ function New-PlxTable {
         [Parameter(Mandatory, ParameterSetName = 'ScriptBlock')][scriptblock]$ScriptBlock,
         [Parameter(Mandatory, ParameterSetName = 'InputObject')][AllowEmptyCollection()][object[]]$InputObject,
         [string[]]$Property,
+        [string]$Key,
         [ValidateSet('None', 'Single', 'Multiple')][string]$Selection = 'Multiple',
         [ValidateRange(0, 86400)][int]$AutoRefresh = 0,
         [string]$Title
     )
     New-PlxNode -Type 'table' -Name $Name -Invocation $MyInvocation -Props @{
-        scriptBlock = $ScriptBlock; inputObject = $InputObject; property = $Property
+        scriptBlock = $ScriptBlock; inputObject = $InputObject; property = $Property; key = $Key
         selection = $Selection.ToLowerInvariant(); autoRefresh = $AutoRefresh; title = $Title
     }
 }

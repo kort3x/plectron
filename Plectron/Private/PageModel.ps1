@@ -4,8 +4,9 @@
 
 $script:PlxDataTypes = @('table', 'chart', 'dropdown')
 $script:PlxInputTypes = @('textbox', 'dropdown', 'checkbox', 'number')
-$script:PlxReservedNames = @('Selected', 'Input', 'PSItem', 'args', 'this', 'Host', 'true', 'false', 'null', 'Error', 'PID', 'PWD', 'HOME', 'PSCmdlet', 'MyInvocation')
+$script:PlxReservedNames = @('Selected', '_', 'Input', 'PSItem', 'args', 'this', 'Host', 'true', 'false', 'null', 'Error', 'PID', 'PWD', 'HOME', 'PSCmdlet', 'MyInvocation', 'Matches', 'LASTEXITCODE')
 $script:PlxMaxRows = 2000
+$script:PlxMaxPoints = 500
 
 function Get-PlxPageNodes {
     param($Node)
@@ -27,7 +28,7 @@ function Assert-PlxPage {
         if (-not $n.name) { continue }
         $where = Get-PlxNodeLocation $n
         if ($n.name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { throw "${where}: '$($n.name)' is not a valid name (letters, digits and _ only; it becomes the variable `$$($n.name))." }
-        if ($script:PlxReservedNames -contains $n.name) { throw "${where}: '$($n.name)' is reserved; choose another name." }
+        if ($script:PlxReservedNames -contains $n.name -or $n.name -like '__plx*') { throw "${where}: '$($n.name)' is reserved; choose another name." }
         if ($named.ContainsKey($n.name)) { throw "${where}: the name '$($n.name)' is already used." }
         $named[$n.name] = $n
     }
@@ -138,35 +139,41 @@ function ConvertTo-PlxInputValue {
 
 # Runs a page scriptblock with the variables in scope. Kept as a plain function
 # (not a module member) so the scriptblock sees them through dynamic scoping.
+# Every function on the way here names its parameters and locals __plx* so
+# none of them can shadow the page's own variables.
 function Invoke-PlxPageScript {
     param($__plxScript, $__plxVariables)
     foreach ($__plxName in $__plxVariables.Keys) { Set-Variable -Name $__plxName -Value $__plxVariables[$__plxName] }
     & $__plxScript
 }
 
+function Test-PlxStreamRecord {
+    param($Item)
+    $base = $Item
+    if ($Item -is [System.Management.Automation.PSObject]) { $base = $Item.PSObject.BaseObject }
+    return $base -is [System.Management.Automation.ErrorRecord] -or $base -is [System.Management.Automation.WarningRecord] -or
+        $base -is [System.Management.Automation.InformationRecord] -or $base -is [System.Management.Automation.VerboseRecord] -or
+        $base -is [System.Management.Automation.DebugRecord]
+}
+
 function Update-PlxPageData {
-    param($State, [string]$Name, $Variables)
-    $node = $State.nodes[$Name]
-    $items = @()
-    if ($node.props.scriptBlock) {
+    param($__plxState, [string]$__plxDataName, $__plxVariables)
+    $__plxNode = $__plxState.nodes[$__plxDataName]
+    $__plxItems = New-Object System.Collections.Generic.List[object]
+    if ($__plxNode.props.scriptBlock) {
         # Stream records (warnings, errors, messages) pass through; objects become the data.
-        foreach ($item in @(Invoke-PlxPageScript $node.props.scriptBlock $Variables *>&1)) {
-            $base = $item
-            if ($item -is [System.Management.Automation.PSObject]) { $base = $item.PSObject.BaseObject }
-            if ($base -is [System.Management.Automation.ErrorRecord] -or $base -is [System.Management.Automation.WarningRecord] -or
-                $base -is [System.Management.Automation.InformationRecord] -or $base -is [System.Management.Automation.VerboseRecord] -or
-                $base -is [System.Management.Automation.DebugRecord]) { $item }
-            else { $items += , $item }
+        foreach ($__plxItem in @(Invoke-PlxPageScript $__plxNode.props.scriptBlock $__plxVariables *>&1)) {
+            if (Test-PlxStreamRecord $__plxItem) { $__plxItem } else { $__plxItems.Add($__plxItem) }
         }
-    } elseif ($null -ne $node.props.inputObject) {
-        $items = @($node.props.inputObject)
-    } elseif ($node.type -eq 'dropdown') {
+    } elseif ($null -ne $__plxNode.props.inputObject) {
+        foreach ($__plxItem in $__plxNode.props.inputObject) { $__plxItems.Add($__plxItem) }
+    } elseif ($__plxNode.type -eq 'dropdown') {
         return
     }
-    $slot = $State.data[$Name]
-    $slot.version++
-    $slot.items = $items
-    New-PlxPageEvent 'data' (ConvertTo-PlxPageData -Node $node -Slot $slot)
+    $__plxSlot = $__plxState.data[$__plxDataName]
+    $__plxSlot.version++
+    $__plxSlot.items = $__plxItems.ToArray()
+    New-PlxPageEvent 'data' (ConvertTo-PlxPageData -Node $__plxNode -Slot $__plxSlot)
 }
 
 function ConvertTo-PlxPageData {
@@ -190,7 +197,8 @@ function ConvertTo-PlxPageData {
             $data.truncated = $Slot.items.Count -gt $script:PlxMaxRows
         }
         'chart' {
-            $data.points = @(foreach ($item in $Slot.items) {
+            $data.truncated = $Slot.items.Count -gt $script:PlxMaxPoints
+            $data.points = @(foreach ($item in ($Slot.items | Select-Object -First $script:PlxMaxPoints)) {
                     $y = [ordered]@{}
                     foreach ($p in $Node.props.y) {
                         $v = $item.$p
@@ -208,29 +216,30 @@ function ConvertTo-PlxPageData {
 # Entry point for one request from the browser. Emits Plx.Event objects and the
 # action's own stream records; the page host turns both into protocol events.
 function Invoke-PlxPageRequest {
-    param($Request)
-    $state = $global:__plxPage
-    switch ($Request.type) {
+    param($__plxRequest)
+    $__plxState = $global:__plxPage
+    switch ($__plxRequest.type) {
         'load' {
-            New-PlxPageEvent 'layout' $state.layout
-            $vars = Get-PlxPageVariables -State $state -Request @{}
-            foreach ($name in @($state.data.Keys | Sort-Object)) { Update-PlxPageData -State $state -Name $name -Variables $vars }
+            New-PlxPageEvent 'layout' $__plxState.layout
+            $__plxVars = Get-PlxPageVariables -State $__plxState -Request @{}
+            foreach ($__plxName in @($__plxState.data.Keys | Sort-Object)) { Update-PlxPageData $__plxState $__plxName $__plxVars }
         }
         'refresh' {
-            $vars = Get-PlxPageVariables -State $state -Request $Request
-            foreach ($name in @($Request.names)) {
-                if (-not $state.data.ContainsKey([string]$name) -or -not $state.nodes[[string]$name].props.scriptBlock) { throw "'$name' cannot be refreshed." }
-                Update-PlxPageData -State $state -Name ([string]$name) -Variables $vars
+            # Data sources see input values only; selections are for actions.
+            $__plxVars = Get-PlxPageVariables -State $__plxState -Request @{ inputs = $__plxRequest.inputs }
+            foreach ($__plxName in @($__plxRequest.names)) {
+                if (-not $__plxState.data.ContainsKey([string]$__plxName) -or -not $__plxState.nodes[[string]$__plxName].props.scriptBlock) { throw "'$__plxName' cannot be refreshed." }
+                Update-PlxPageData $__plxState ([string]$__plxName) $__plxVars
             }
         }
         'invoke' {
-            $button = $state.handlers[[string]$Request.handler]
-            if (-not $button) { throw "Unknown action '$($Request.handler)'." }
-            $vars = Get-PlxPageVariables -State $state -Request $Request
-            Invoke-PlxPageScript $button.props.scriptBlock $vars *>&1
-            $refreshVars = Get-PlxPageVariables -State $state -Request @{ inputs = $Request.inputs }
-            foreach ($name in @($button.props.refresh)) { if ($name) { Update-PlxPageData -State $state -Name $name -Variables $refreshVars } }
+            $__plxButton = $__plxState.handlers[[string]$__plxRequest.handler]
+            if (-not $__plxButton) { throw "Unknown action '$($__plxRequest.handler)'." }
+            $__plxVars = Get-PlxPageVariables -State $__plxState -Request $__plxRequest
+            Invoke-PlxPageScript $__plxButton.props.scriptBlock $__plxVars *>&1
+            $__plxVars = Get-PlxPageVariables -State $__plxState -Request @{ inputs = $__plxRequest.inputs }
+            foreach ($__plxName in @($__plxButton.props.refresh)) { if ($__plxName) { Update-PlxPageData $__plxState $__plxName $__plxVars } }
         }
-        default { throw "Unknown request type '$($Request.type)'." }
+        default { throw "Unknown request type '$($__plxRequest.type)'." }
     }
 }

@@ -26,18 +26,21 @@ export async function pageView(main, id, { navigate }) {
   const disposers = [];
   let busy = 0;
   let closed = false;
+  let currentAction = null;
+  // Ids are chosen here so events that arrive before the POST returns still match.
+  const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
   const body = h('div', { class: 'pg-body' }, h('div', { class: 'pg-loading' }, h('span', { class: 'spinner' }), 'Starting page…'));
   const titleEl = h('h1', null, info.title);
   const descEl = h('div', { class: 'sub' }, info.description || '');
   const banner = h('div', { class: 'alert', hidden: true });
-  const cancelBtn = h('button', { class: 'btn danger sm', hidden: true, onclick: () => api.cancel(sid).catch((e) => toast(e.message, 'error')) }, svg(icons.stop, 13), 'Cancel');
+  const cancelBtn = h('button', { class: 'btn danger sm', hidden: true, onclick: () => api.cancel(sid, currentAction).catch((e) => toast(e.message, 'error')) }, svg(icons.stop, 13), 'Cancel');
 
   // Output drawer for actions without -Output.
   const drawerConsole = h('div', { class: 'console' });
   const drawerProgress = h('div', { class: 'progress-list' });
   const drawer = h('section', { class: 'pg-drawer', hidden: true, 'aria-label': 'Action output' },
-    h('div', { class: 'pg-drawer-head' }, h('b', null, 'Output'), h('span', { class: 'spacer' }), cancelBtn,
+    h('div', { class: 'pg-drawer-head' }, h('b', null, 'Output'), h('span', { class: 'spacer' }),
       h('button', { class: 'icon-btn', 'aria-label': 'Close output', onclick: () => { drawer.hidden = true; } }, '×')),
     drawerProgress, drawerConsole);
   const drawerView = { console: createConsole(drawerConsole, { emptyText: 'Action output appears here.' }), progress: createProgress(drawerProgress) };
@@ -46,12 +49,24 @@ export async function pageView(main, id, { navigate }) {
   main.append(h('div', { class: 'page pg' },
     h('div', { class: 'page-head' },
       h('div', { class: 'titles' }, h('div', { class: 'crumbs' }, h('a', { href: '#/' }, 'Home'), ' / Pages'), titleEl, descEl),
-      h('div', { class: 'form-actions' }, outputBtn)),
+      h('div', { class: 'form-actions' }, cancelBtn, outputBtn)),
     banner, body, drawer));
 
   // ---- requests -----------------------------------------------------------
   function payload() {
     return { inputs: { ...inputs }, selections: JSON.parse(JSON.stringify(selections)) };
+  }
+
+  async function send(call, body, entry) {
+    const id = newId();
+    requests[id] = entry;
+    try {
+      await call(sid, { id, ...body });
+      return id;
+    } catch (e) {
+      delete requests[id];
+      throw e;
+    }
   }
 
   function setBusy(delta) {
@@ -63,8 +78,7 @@ export async function pageView(main, id, { navigate }) {
   async function refresh(names) {
     if (closed || !names.length) return;
     try {
-      const r = await api.refresh(sid, { names, ...payload() });
-      requests[r.id] = { target: drawerView, quiet: true };
+      await send(api.refresh, { names, inputs: { ...inputs } }, { target: drawerView, quiet: true });
     } catch (e) { toast(e.message, 'error'); }
   }
 
@@ -76,8 +90,7 @@ export async function pageView(main, id, { navigate }) {
     button.classList.add('running');
     setBusy(1);
     try {
-      const r = await api.invoke(sid, { handler: node.handler, ...payload() });
-      requests[r.id] = { target, button, action: true };
+      currentAction = await send(api.invoke, { handler: node.handler, ...payload() }, { target, button, action: true });
     } catch (e) {
       toast(e.message, 'error');
       button.classList.remove('running');
@@ -131,6 +144,7 @@ export async function pageView(main, id, { navigate }) {
     if (!req) return;
     req.target.progress.clear();
     if (req.action) {
+      if (currentAction === ev.req) currentAction = null;
       req.button.classList.remove('running');
       setBusy(-1);
       req.target.console.append([{ t: 'end', ts: new Date().toISOString(), data: { status } }]);
@@ -219,13 +233,19 @@ export async function pageView(main, id, { navigate }) {
     disposers.push(() => table.dispose());
     controls[node.name] = {
       update(data) {
+        // With -Key, rows that are still there stay selected across refreshes.
+        const keep = new Set();
+        if (p.key) {
+          const chosen = new Set(table.selected());
+          for (const r of rows) if (chosen.has(keys.get(r))) keep.add(String(r[p.key]));
+        }
         version = data.version;
         columns = data.columns && data.columns.length ? data.columns : null;
         rows = data.rows.map((r) => (r.value !== null && typeof r.value === 'object' && !Array.isArray(r.value) ? r.value : { Value: r.value }));
         keys = new Map(rows.map((r, i) => [r, data.rows[i].key]));
         count.textContent = data.truncated ? `${data.rows.length} of ${data.count}` : String(data.count);
-        table.clearSelection();
         table.render();
+        table.setSelection(keep.size ? rows.filter((r) => keep.has(String(r[p.key]))).map((r) => keys.get(r)) : []);
       },
     };
     table.render();

@@ -51,9 +51,14 @@ function Start-PlxPageSession {
     Write-PlxPrivateFile -Path $jobPath -Content (ConvertTo-PlxJson @{
             pagePath = $Page.path; root = $State.Root; setup = $State.Project.Setup; modules = @($State.Project.Modules)
         })
-    $engine = Resolve-PlxEngine -Preferred $State.Engine
-    $pageHost = Join-Path (Split-Path $State.RunHostPath) 'PageHost.ps1'
-    $child = Start-PlxChildProcess -Exe $engine -Arguments (Get-PlxHostArguments -Script $pageHost -JobPath $jobPath) -WorkingDirectory $State.Root
+    try {
+        $engine = Resolve-PlxEngine -Preferred $State.Engine
+        $pageHost = Join-Path (Split-Path $State.RunHostPath) 'PageHost.ps1'
+        $child = Start-PlxChildProcess -Exe $engine -Arguments (Get-PlxHostArguments -Script $pageHost -JobPath $jobPath) -WorkingDirectory $State.Root
+    } catch {
+        Remove-Item -LiteralPath $jobPath, $dir -Recurse -Force -ErrorAction SilentlyContinue
+        throw
+    }
 
     $entry = [hashtable]::Synchronized(@{
             Id = $id; PageId = $Page.id; Dir = $dir; Process = $child.Process; Stdin = $child.Stdin
@@ -85,6 +90,23 @@ function Invoke-PlxSessionPump {
     }
 }
 
+# Action ids on the page, read once from the layout event the page host sent.
+function Get-PlxSessionHandlers {
+    param([Parameter(Mandatory)]$Entry)
+    if ($Entry.Handlers) { return $Entry.Handlers }
+    $file = Join-Path $Entry.Dir 'events.ndjson'
+    $chunk = Read-PlxEventChunk -Path $file -Offset 0
+    foreach ($line in $chunk.Lines) {
+        if (-not $line.StartsWith('{"t":"layout"')) { continue }
+        $ids = New-Object System.Collections.Generic.List[string]
+        $walk = { param($n) if ($n.handler) { $ids.Add([string]$n.handler) }; foreach ($c in $n.children) { & $walk $c } }
+        & $walk (ConvertFrom-PlxJson $line).data
+        $Entry.Handlers = $ids.ToArray()
+        return $Entry.Handlers
+    }
+    return @()
+}
+
 function Send-PlxPageRequest {
     param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)][hashtable]$Request)
     if ($Entry.Done -or $Entry.Process.HasExited) { throw 'The page process has stopped. Reload the page.' }
@@ -93,23 +115,40 @@ function Send-PlxPageRequest {
     try { $Entry.Stdin.WriteLine($line) } finally { [System.Threading.Monitor]::Exit($Entry.Stdin) }
 }
 
+# Never blocks: the process is killed right away and the pump runspace is
+# disposed by Remove-PlxIdleSessions once it has written the final 'end' event.
 function Stop-PlxPageSession {
     param([Parameter(Mandatory)][hashtable]$State, [Parameter(Mandatory)][string]$Id)
-    $entry = $State.Sessions[$Id]
+    $entry = $null
+    [System.Threading.Monitor]::Enter($State.Sessions.SyncRoot)
+    try {
+        $entry = $State.Sessions[$Id]
+        if ($entry) { $State.Sessions.Remove($Id) }
+    } finally { [System.Threading.Monitor]::Exit($State.Sessions.SyncRoot) }
     if (-not $entry) { return $false }
-    $State.Sessions.Remove($Id)
-    # Closing stdin lets the page host exit by itself; kill it if it doesn't.
-    try { $entry.Stdin.Close() } catch { $null = $_ }
-    try { if (-not $entry.Process.WaitForExit(2000)) { Stop-PlxProcessTree -Process $entry.Process } } catch { $null = $_ }
-    if ($entry.Handle) { $null = $entry.Handle.AsyncWaitHandle.WaitOne(5000) }
-    if ($entry.PowerShell) {
-        $rs = $entry.PowerShell.Runspace
-        $entry.PowerShell.Dispose()
-        if ($rs) { $rs.Dispose() }
-    }
+    [System.Threading.Monitor]::Enter($entry.Stdin)
+    try { $entry.Stdin.Close() } catch { $null = $_ } finally { [System.Threading.Monitor]::Exit($entry.Stdin) }
+    try { Stop-PlxProcessTree -Process $entry.Process } catch { $null = $_ }
     # Keep the events file briefly so a connected browser can read the final 'end'.
-    $State.ClosedSessions[$Id] = @{ Dir = $entry.Dir; At = [DateTime]::UtcNow }
+    $State.ClosedSessions[$Id] = @{ Entry = $entry; At = [DateTime]::UtcNow }
     return $true
+}
+
+function Close-PlxSessionPump {
+    param($Entry)
+    if (-not $Entry.PowerShell) { return }
+    $rs = $Entry.PowerShell.Runspace
+    $Entry.PowerShell.Dispose()
+    if ($rs) { $rs.Dispose() }
+    $Entry.PowerShell = $null
+}
+
+# Thread-safe change of a session's connected-client count.
+function Update-PlxSessionClients {
+    param($Entry, [int]$Delta)
+    [System.Threading.Monitor]::Enter($Entry.SyncRoot)
+    try { $Entry.Clients += $Delta; $Entry.LastSeen = [DateTime]::UtcNow }
+    finally { [System.Threading.Monitor]::Exit($Entry.SyncRoot) }
 }
 
 # Called about once a second by the dispatcher.
@@ -117,15 +156,18 @@ function Remove-PlxIdleSessions {
     param([Parameter(Mandatory)][hashtable]$State)
     $now = [DateTime]::UtcNow
     foreach ($id in @($State.Sessions.Keys)) {
-        $e = $State.Sessions[$id]
-        if (-not $e) { continue }
-        if ($e.Clients -le 0 -and ($now - $e.LastSeen).TotalSeconds -gt $State.SessionIdleSeconds) { $null = Stop-PlxPageSession -State $State -Id $id }
+        $session = $State.Sessions[$id]
+        if (-not $session) { continue }
+        $idle = $session.Clients -le 0 -and ($now - $session.LastSeen).TotalSeconds -gt $State.SessionIdleSeconds
+        if ($idle -or $session.Done) { $null = Stop-PlxPageSession -State $State -Id $id }
     }
     foreach ($id in @($State.ClosedSessions.Keys)) {
-        $c = $State.ClosedSessions[$id]
-        if (($now - $c.At).TotalSeconds -gt 30) {
+        $closed = $State.ClosedSessions[$id]
+        if ($closed.Entry.Done) { Close-PlxSessionPump -Entry $closed.Entry }
+        if (($now - $closed.At).TotalSeconds -gt 30) {
             $State.ClosedSessions.Remove($id)
-            Remove-Item -LiteralPath $c.Dir -Recurse -Force -ErrorAction SilentlyContinue
+            Close-PlxSessionPump -Entry $closed.Entry
+            Remove-Item -LiteralPath $closed.Entry.Dir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }

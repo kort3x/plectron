@@ -102,6 +102,17 @@ Describe 'PageHost' {
         ($ev | Where-Object t -eq 'progress').data.activity | Should -Contain 'Waiting'
         Out-Lines (Invoke-Host $h @{ type = 'invoke'; handler = $h.Handlers.Count }) | Should -Contain 'counter:3'
     }
+    It 'cancels a queued request by id without touching the running one' {
+        Send-HostRequest $h @{ id = 'run1'; type = 'invoke'; handler = $h.Handlers.Slow }
+        Send-HostRequest $h @{ id = 'queued1'; type = 'invoke'; handler = $h.Handlers.Count }
+        Start-Sleep -Milliseconds 800
+        Send-HostRequest $h @{ type = 'cancel'; id = 'queued1' }
+        $queued = Read-UntilDone $h 'queued1' 10
+        (Done $queued).status | Should -Be 'cancelled'
+        Out-Lines $queued | Should -Not -Contain 'counter:4'
+        Send-HostRequest $h @{ type = 'cancel'; id = 'run1' }
+        (Done (Read-UntilDone $h 'run1' 15)).status | Should -Be 'cancelled'
+    }
     It 'exits when stdin closes' {
         $h.Process.StandardInput.Close()
         $h.Process.WaitForExit(10000) | Should -BeTrue

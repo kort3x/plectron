@@ -56,14 +56,16 @@ function Start-Plectron {
         [ValidateRange(1, 100000)][int]$HistoryLimit = 200,
         [switch]$NoBrowser,
         [switch]$PassThru,
-        # Used by Show-PlxPage: open straight on the one page.
-        [Parameter(DontShow)][switch]$Single
+        # Used by Show-PlxPage: open straight on the one page, and delete its temp folder on stop.
+        [Parameter(DontShow)][switch]$Single,
+        [Parameter(DontShow)][string]$TempDir
     )
     if ($Path -and -not (Test-Path -LiteralPath $Path -PathType Container)) { throw "Folder '$Path' does not exist." }
     if ($Engine) { $null = Resolve-PlxEngine -Preferred $Engine }
 
     $project = Resolve-PlxProject -Path $Path -Module $Module -Config $Config -Command $Command -Page $Page -Title $Title
     if ($Single) { $project.Single = $true }
+    if ($TempDir) { $project.TempDirs = @($TempDir) }
     $state = New-PlxState -Project $project -HistoryRoot $HistoryPath -Engine $Engine -HistoryLimit $HistoryLimit
     Limit-PlxHistory -HistoryRoot $state.HistoryRoot -Keep $HistoryLimit
     if ($Port -eq 0) { $Port = Get-PlxFreePort }
@@ -154,9 +156,11 @@ function Show-PlxPage {
     $dir = Join-Path ([IO.Path]::GetTempPath()) "plectron-page-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
     $null = New-Item -ItemType Directory -Path $dir
     $file = Join-Path $dir ((ConvertTo-PlxSlug $Title) + '.ps1')
-    [IO.File]::WriteAllText($file, $Content.ToString(), (New-Object System.Text.UTF8Encoding $false))
+    # With a BOM: Windows PowerShell 5.1 reads BOM-less scripts as ANSI.
+    [IO.File]::WriteAllText($file, $Content.ToString(), (New-Object System.Text.UTF8Encoding $true))
     $options = @{}
     foreach ($k in $PSBoundParameters.Keys) { if ($k -ne 'Content') { $options[$k] = $PSBoundParameters[$k] } }
+    $options.TempDir = $dir
     Start-Plectron -Page $file -Single @options
 }
 

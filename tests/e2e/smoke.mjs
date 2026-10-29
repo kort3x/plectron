@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { writeFileSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 // Browser smoke test against a running server on ./examples/ContosoOps.
 // Usage: node tests/e2e/smoke.mjs <url-printed-by-Start-Plectron> [outDir]
 // Set CHROME to the Chrome/Edge executable if it is not in the default macOS location.
@@ -7,12 +7,20 @@ const SP = process.argv[3] || process.cwd();
 const URL = process.argv[2];
 rmSync(`${SP}/chrome-e2e`, { recursive: true, force: true });
 const chrome = spawn(process.env.CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=9333', `--user-data-dir=${SP}/chrome-e2e`, 'about:blank'], { stdio: 'ignore' });
+  ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=0', `--user-data-dir=${SP}/chrome-e2e`, 'about:blank'], { stdio: 'ignore' });
+// Never leave a headless browser behind, whatever happens.
+process.on('exit', () => chrome.kill());
+process.on('uncaughtException', (e) => { console.error(e); process.exitCode = 1; chrome.kill(); process.exit(1); });
+process.on('unhandledRejection', (e) => { console.error(e); process.exitCode = 1; chrome.kill(); process.exit(1); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let target;
 for (let i = 0; i < 50 && !target; i++) {
   await sleep(200);
-  try { target = (await (await fetch('http://127.0.0.1:9333/json/list')).json()).find((t) => t.type === 'page'); } catch {}
+  // Chrome picked a free port and wrote it to DevToolsActivePort in the profile.
+  const portFile = `${SP}/chrome-e2e/DevToolsActivePort`;
+  if (!existsSync(portFile)) continue;
+  const port = readFileSync(portFile, 'utf8').split('\n')[0].trim();
+  try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find((t) => t.type === 'page'); } catch {}
 }
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise((r) => ws.addEventListener('open', r));
@@ -135,7 +143,7 @@ await waitFor(`[...document.querySelectorAll('.toast')].some((t) => t.textConten
 check('action ran on selected rows', true);
 check('action output streamed to panel', await evaluate(`document.querySelector('.pg-output .console').textContent.includes('Restarting')`));
 await sleep(500);
-check('selection cleared after refresh', await evaluate(`document.querySelectorAll('.pg-data td.sel input:checked').length === 0`));
+check('selection kept across refresh with -Key', await evaluate(`document.querySelectorAll('.pg-data .objects td.sel input:checked').length === 2`));
 await shot('e2e-page');
 await evaluate(`[...document.querySelectorAll('.pg-tabs .tab')].find((t) => t.textContent === 'Uptime').click()`);
 check('tabs switch and line chart draws', await evaluate(`!!document.querySelector('.chart path.line-mark') && document.querySelector('.chart path.line-mark').getAttribute('d').length > 10`));

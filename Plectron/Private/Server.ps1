@@ -50,12 +50,11 @@ function Invoke-PlxDispatcher {
             $pending = $Listener.BeginGetContext($null, $null)
             while (-not $pending.AsyncWaitHandle.WaitOne(1000)) {
                 if (-not $Listener.IsListening) { break }
-                Remove-PlxIdleSessions -State $State
+                try { Remove-PlxIdleSessions -State $State } catch { $null = $_ }
             }
             if (-not $Listener.IsListening) { break }
             $ctx = $Listener.EndGetContext($pending)
         } catch { break }
-        Remove-PlxIdleSessions -State $State
         $ps = [powershell]::Create()
         $ps.RunspacePool = $Pool
         $null = $ps.AddCommand('Invoke-PlxRequest').AddParameters(@{ Context = $ctx; State = $State })
@@ -75,6 +74,11 @@ function Stop-PlxServer {
     $State.Stopping = $true
     foreach ($id in @($State.Runs.Keys)) { $null = Stop-PlxRun -State $State -Id $id }
     foreach ($id in @($State.Sessions.Keys)) { $null = Stop-PlxPageSession -State $State -Id $id }
+    foreach ($closed in @($State.ClosedSessions.Values)) {
+        if ($closed.Entry.Handle) { $null = $closed.Entry.Handle.AsyncWaitHandle.WaitOne(5000) }
+        Close-PlxSessionPump -Entry $closed.Entry
+    }
+    foreach ($dir in @($State.Project.TempDirs)) { if ($dir) { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue } }
     try { $Server.Listener.Stop(); $Server.Listener.Close() } catch { $null = $_ }
     try { $null = $Server.Handle.AsyncWaitHandle.WaitOne(5000); $Server.Dispatcher.Dispose() } catch { $null = $_ }
     try { $Server.Pool.Close(); $Server.Pool.Dispose() } catch { $null = $_ }
@@ -293,7 +297,7 @@ function Send-PlxEventStream {
     $lastWrite = [DateTime]::UtcNow
     $finishedSeen = $false
     $isSession = $Entry -and $Entry.ContainsKey('Clients')
-    if ($isSession) { $Entry.Clients++ }
+    if ($isSession) { Update-PlxSessionClients -Entry $Entry -Delta 1 }
     try {
         while (-not $State.Stopping) {
             if ($isSession) { $Entry.LastSeen = [DateTime]::UtcNow }
@@ -331,7 +335,7 @@ function Send-PlxEventStream {
             Start-Sleep -Milliseconds 100
         }
     } finally {
-        if ($isSession) { $Entry.Clients--; $Entry.LastSeen = [DateTime]::UtcNow }
+        if ($isSession) { Update-PlxSessionClients -Entry $Entry -Delta -1 }
     }
 }
 
@@ -367,26 +371,25 @@ function Invoke-PlxSessionsApi {
         Send-PlxEventStream -Request $Request -Response $Response -State $State -File (Join-Path $entry.Dir 'events.ndjson') -Entry $entry
         return
     }
-    if (-not $action -and $Method -eq 'DELETE') {
+    # sendBeacon can only POST, so POST /close is the same as DELETE.
+    if ((-not $action -and $Method -eq 'DELETE') -or ($action -eq 'close' -and $Method -eq 'POST')) {
         $null = Stop-PlxPageSession -State $State -Id $id
         Send-PlxResponse -Response $Response -Status 204
         return
     }
     if ($Method -ne 'POST') { Send-PlxError $Response 404 'Not found.'; return }
-    # sendBeacon can only POST: /close is DELETE for closing tabs.
-    if ($action -eq 'close') {
-        $null = Stop-PlxPageSession -State $State -Id $id
-        Send-PlxResponse -Response $Response -Status 204
-        return
-    }
 
     $body = Read-PlxRequestJson $Request
     if (-not $body) { $body = @{} }
-    $requestId = (New-PlxToken).Substring(0, 8)
+    # The browser picks the request id so it can match events that arrive
+    # before this response does.
+    $requestId = [string]$body.id
+    if ($requestId -notmatch '^[A-Za-z0-9]{6,32}$') { $requestId = (New-PlxToken).Substring(0, 8) }
     $request = $null
     switch ($action) {
         'invoke' {
             if ([string]$body.handler -notmatch '^h\d+$') { Send-PlxError $Response 400 'Invalid action.'; return }
+            if (@(Get-PlxSessionHandlers -Entry $entry) -notcontains [string]$body.handler) { Send-PlxError $Response 404 'This page has no such action.'; return }
             $request = @{ id = $requestId; type = 'invoke'; handler = [string]$body.handler; inputs = $body.inputs; selections = $body.selections }
         }
         'refresh' {
@@ -396,11 +399,15 @@ function Invoke-PlxSessionsApi {
             }
             $request = @{ id = $requestId; type = 'refresh'; names = $body.names; inputs = $body.inputs; selections = $body.selections }
         }
-        'cancel' { $request = @{ type = 'cancel' } }
+        'cancel' {
+            $request = @{ type = 'cancel' }
+            if ([string]$body.id -match '^[A-Za-z0-9]{6,32}$') { $request.id = [string]$body.id }
+        }
         default { Send-PlxError $Response 404 'Not found.'; return }
     }
     try { Send-PlxPageRequest -Entry $entry -Request $request }
     catch { Send-PlxError $Response 410 $_.Exception.Message; return }
+    if ($action -eq 'cancel') { Send-PlxResponse -Response $Response -Status 202; return }
     Send-PlxJson $Response @{ id = $requestId } 202
 }
 

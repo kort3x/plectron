@@ -48,6 +48,7 @@ function New-PlxProject {
         PageFiles = @(foreach ($p in $PageFiles) { & $resolve $p 'Page' -MustExist })
         Include = @($Include); Exclude = @($Exclude); Setup = $setupPath; Engine = $Engine; Commands = $Commands
         Single = $false
+        TempDirs = @()
     }
 }
 

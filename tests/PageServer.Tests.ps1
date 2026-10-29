@@ -70,6 +70,20 @@ Describe 'page sessions' {
         ($ev = Wait-Request $s $r.Json.id) | Out-Null
         ($ev | Where-Object t -eq 'done').data.status | Should -Be 'cancelled'
     }
+    It 'returns 404 for actions the page does not have' {
+        (Send POST "/api/sessions/$($s.Id)/invoke" @{ handler = 'h999' }).Status | Should -Be 404
+    }
+    It 'uses the request id chosen by the browser' {
+        $r = Send POST "/api/sessions/$($s.Id)/invoke" @{ id = 'browser42'; handler = $s.Handlers.Count }
+        $r.Json.id | Should -Be 'browser42'
+        (Wait-Request $s 'browser42' | Where-Object t -eq 'done').data.status | Should -Be 'succeeded'
+    }
+    It 'cancels a specific request' {
+        $null = Send POST "/api/sessions/$($s.Id)/invoke" @{ id = 'slowone'; handler = $s.Handlers.Slow }
+        Start-Sleep -Seconds 1
+        (Send POST "/api/sessions/$($s.Id)/cancel" @{ id = 'slowone' }).Status | Should -Be 202
+        (Wait-Request $s 'slowone' | Where-Object t -eq 'done').data.status | Should -Be 'cancelled'
+    }
     It 'rejects malformed requests' {
         (Send POST "/api/sessions/$($s.Id)/invoke" @{ handler = '../x' }).Status | Should -Be 400
         (Send POST "/api/sessions/$($s.Id)/refresh" @{ names = 'Items' }).Status | Should -Be 400

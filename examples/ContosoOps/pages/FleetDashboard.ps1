@@ -42,7 +42,7 @@ own PowerShell process and streams its progress into the output panel.
     }
     New-PlxTabs {
         New-PlxTab 'Servers' {
-            New-PlxTable -Name Servers -Title 'Servers' -ScriptBlock {
+            New-PlxTable -Name Servers -Title 'Servers' -Key Name -ScriptBlock {
                 $script:servers | Where-Object { ($Region -eq 'All' -or $_.Region -eq $Region) -and $_.Cpu -ge $MinCpu }
             }
             New-PlxRow {

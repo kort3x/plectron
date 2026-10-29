@@ -55,7 +55,7 @@ function inline(text) {
     else if (t.startsWith('`')) out.push(h('code', null, t.slice(1, -1)));
     else if (t.startsWith('[')) {
       const [, label, href] = t.match(/^\[([^\]]+)\]\(([^)\s]+)\)$/);
-      if (/^(https?:|mailto:|#|\/)/i.test(href)) out.push(h('a', { href, target: href.startsWith('#') ? null : '_blank', rel: 'noopener noreferrer' }, label));
+      if (/^(https?:|mailto:|#|\/(?!\/))/i.test(href)) out.push(h('a', { href, target: href.startsWith('#') ? null : '_blank', rel: 'noopener noreferrer' }, label));
       else out.push(label);
     } else out.push(h('em', null, t.slice(1, -1)));
     rest = rest.slice(m.index + t.length);

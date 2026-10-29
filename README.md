@@ -115,6 +115,8 @@ The `.SYNOPSIS` of a page file is used as its description in the sidebar.
   variables and objects until the tab is closed. Use `$script:` variables for state
   that actions change.
 - Only one action runs at a time per page, and **Cancel** stops it.
+- Page code runs in the page process, never in your console, and input values
+  only ever reach it as variables, never as code.
 - A page nobody is viewing is closed after two minutes.
 - Page actions are not recorded in run history.
 
@@ -122,7 +124,7 @@ The `.SYNOPSIS` of a page file is used as its description in the sidebar.
 |---|---|
 | `New-PlxPage [-Title] [-Description] {…}` | The page itself. |
 | `New-PlxRow {…}`, `New-PlxColumn [-Width] {…}`, `New-PlxCard [-Title] {…}`, `New-PlxTabs { New-PlxTab 'Name' {…} }` | Layout. |
-| `New-PlxTable -Name (-ScriptBlock \| -InputObject) [-Property] [-Selection None\|Single\|Multiple] [-AutoRefresh <s>] [-Title]` | Sortable, filterable table with row selection. |
+| `New-PlxTable -Name (-ScriptBlock \| -InputObject) [-Property] [-Key <prop>] [-Selection None\|Single\|Multiple] [-AutoRefresh <s>] [-Title]` | Sortable, filterable table with row selection. With `-Key`, selected rows stay selected when the table refreshes. |
 | `New-PlxChart -Name -X <prop> -Y <prop[]> [-Type Bar\|Line] (-ScriptBlock \| -InputObject) [-Title]` | Bar or line chart (up to four series), with a table view. |
 | `New-PlxTextBox`, `New-PlxDropdown (-Options \| -ScriptBlock)`, `New-PlxCheckbox`, `New-PlxNumber [-Min] [-Max]` | Inputs; all take `-Name -Label -Default -Refresh`. |
 | `New-PlxButton <Text> -ScriptBlock [-Refresh] [-Confirm <question>] [-Variant Default\|Primary\|Danger] [-Output <name>]` | Runs an action in the page process. |

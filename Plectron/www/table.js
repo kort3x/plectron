@@ -147,6 +147,7 @@ export function createTable(host, { getRows, getDisplay = () => null, exportName
     render,
     selected: () => [...selected],
     clearSelection() { selected.clear(); if (onSelect) onSelect([]); },
+    setSelection(keys) { selected.clear(); for (const k of keys) selected.add(k); changed(); },
     dispose: () => document.removeEventListener('click', closeMenu),
   };
 }

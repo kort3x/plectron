@@ -7,7 +7,7 @@ New-PlxPage -Title 'Task manager' -Description 'The table holds real Process obj
         New-PlxTextBox -Name Filter -Label 'Name contains' -Placeholder 'e.g. code' -Refresh Processes
         New-PlxDropdown -Name SortBy -Label 'Sort by' -Options 'WorkingSet', 'CPU', 'Id', 'Name' -Default 'WorkingSet' -Refresh Processes
     }
-    New-PlxTable -Name Processes -Title 'Processes' -Property Name, Id, CPU, WorkingSet -AutoRefresh 10 -ScriptBlock {
+    New-PlxTable -Name Processes -Title 'Processes' -Key Id -Property Name, Id, CPU, WorkingSet -AutoRefresh 10 -ScriptBlock {
         Get-Process | Where-Object Name -like "*$Filter*" | Sort-Object $SortBy -Descending:($SortBy -ne 'Name') | Select-Object -First 200
     }
     New-PlxRow {

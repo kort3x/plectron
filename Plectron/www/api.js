@@ -31,7 +31,7 @@ export const api = {
   sessionEvents: (sid) => new EventSource(`/api/sessions/${sid}/events`),
   invoke: (sid, body) => request('POST', `/api/sessions/${sid}/invoke`, body),
   refresh: (sid, body) => request('POST', `/api/sessions/${sid}/refresh`, body),
-  cancel: (sid) => request('POST', `/api/sessions/${sid}/cancel`, {}),
+  cancel: (sid, id) => request('POST', `/api/sessions/${sid}/cancel`, id ? { id } : {}),
   closeSession: (sid) => fetch(`/api/sessions/${sid}`, { method: 'DELETE', credentials: 'same-origin', keepalive: true }).catch(() => {}),
   closeSessionOnUnload: (sid) => navigator.sendBeacon(`/api/sessions/${sid}/close`),
 };

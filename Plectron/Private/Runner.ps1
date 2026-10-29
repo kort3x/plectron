@@ -102,7 +102,16 @@ function Start-PlxRun {
     Save-PlxRunMeta -Dir $dir -Meta $meta
 
     $jobPath = Join-Path ([IO.Path]::GetTempPath()) "plectron-$([guid]::NewGuid().ToString('N')).json"
-    Write-PlxPrivateFile -Path $jobPath -Content (ConvertTo-PlxJson @{ scriptPath = $Tool.path; parameters = $job.parameters; secure = $job.secure })
+    $payload = @{ kind = $Tool.kind; setup = $State.Project.Setup; parameters = $job.parameters; secure = $job.secure }
+    $workingDirectory = $State.Root
+    if ($Tool.kind -eq 'command') {
+        $payload.module = $Tool.path
+        $payload.command = $Tool.command
+    } else {
+        $payload.scriptPath = $Tool.path
+        $workingDirectory = Split-Path $Tool.path
+    }
+    Write-PlxPrivateFile -Path $jobPath -Content (ConvertTo-PlxJson $payload)
 
     $policy = ''
     if (Test-PlxWindows) { $policy = '-ExecutionPolicy Bypass ' }
@@ -117,7 +126,7 @@ function Start-PlxRun {
     $ps.Runspace = $rs
     $null = $ps.AddCommand('Invoke-PlxRunPump').AddParameters(@{
             Entry = $entry; RunDir = $dir; Exe = $engine; Arguments = $arguments
-            JobPath = $jobPath; WorkingDirectory = (Split-Path $Tool.path)
+            JobPath = $jobPath; WorkingDirectory = $workingDirectory
         })
     $entry.PowerShell = $ps
     $entry.Handle = $ps.BeginInvoke()

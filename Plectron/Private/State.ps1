@@ -3,21 +3,27 @@
 
 function New-PlxState {
     param(
-        [Parameter(Mandatory)][string]$Root,
+        [hashtable]$Project,
+        [string]$Root,
         [string]$HistoryRoot,
         [string]$Engine,
         [int]$HistoryLimit = 200
     )
-    if (-not $HistoryRoot) { $HistoryRoot = Join-Path (Join-Path $HOME '.plectron') 'runs' }
+    # -Root is shorthand for a project that only serves a scripts folder.
+    if (-not $Project) { $Project = New-PlxProject -Root $Root -Scripts @($Root) }
+    if (-not $Engine) { $Engine = $Project.Engine }
+    if (-not $HistoryRoot) { $HistoryRoot = Get-PlxDefaultHistoryRoot -ProjectRoot $Project.Root }
     if (-not (Test-Path -LiteralPath $HistoryRoot)) { $null = New-Item -ItemType Directory -Path $HistoryRoot -Force }
     $moduleRoot = Split-Path $PSScriptRoot
     return [hashtable]::Synchronized(@{
-            Root = (Resolve-Path -LiteralPath $Root).Path
+            Project = $Project
+            Root = $Project.Root
             HistoryRoot = (Resolve-Path -LiteralPath $HistoryRoot).Path
             HistoryLimit = $HistoryLimit
             Engine = $Engine
             Runs = [hashtable]::Synchronized(@{})
             ToolCache = [hashtable]::Synchronized(@{})
+            CommandCache = [hashtable]::Synchronized(@{})
             CorePath = Join-Path $PSScriptRoot 'Plectron.Core.psm1'
             RunHostPath = Join-Path (Join-Path $moduleRoot 'RunHost') 'RunHost.ps1'
             WwwRoot = Join-Path $moduleRoot 'www'

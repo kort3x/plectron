@@ -303,3 +303,6 @@ table.grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
 }
 .console.hide-verbose .line[data-t="verbose"], .console.hide-debug .line[data-t="debug"], .console.hide-info .line[data-t="info"] { display: none; }
 [hidden] { display: none !important; }
+.cmd-name { display: inline-block; margin-top: 8px; font-size: 12px; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 7px; }
+.app.single { grid-template-columns: minmax(0, 1fr); }
+.app.single .sidebar, .app.single .search, .app.single .menu-btn { display: none; }

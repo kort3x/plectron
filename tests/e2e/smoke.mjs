@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { writeFileSync, rmSync } from 'node:fs';
-// Browser smoke test against a running server on ./examples.
+// Browser smoke test against a running server on ./examples/ContosoOps.
 // Usage: node tests/e2e/smoke.mjs <url-printed-by-Start-Plectron> [outDir]
 // Set CHROME to the Chrome/Edge executable if it is not in the default macOS location.
 const SP = process.argv[3] || process.cwd();
@@ -33,8 +33,10 @@ const check = (name, ok) => { console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`); if
 await send('Runtime.enable'); await send('Log.enable'); await send('Page.enable');
 await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 950, deviceScaleFactor: 1, mobile: false });
 await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
-await send('Page.navigate', { url: URL + '#/tool/invoke-deployment' });
+await send('Page.navigate', { url: URL + '#/tool/contosoops.invoke-deployment' });
 await waitFor(`!!document.querySelector('#f-Environment')`);
+check('project branding applied', await evaluate(`document.title === 'Contoso Ops' && document.querySelector('.brand span').textContent === 'Contoso Ops' && getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() === '#0a7cff'`));
+check('command name shown', await evaluate(`document.querySelector('.cmd-name')?.textContent === 'ContosoOps\\\\Invoke-Deployment'`));
 check('no stray null text in form', !(await evaluate(`document.querySelector('form').firstChild.nodeType === 3`)));
 check('array default preselected', await evaluate(`[...document.querySelectorAll('.pill-opt[aria-pressed=true]')].map(b=>b.textContent).join(',') === 'api,web,worker'`));
 
@@ -94,7 +96,7 @@ await shot('e2e-history-light');
 
 // greeting: secrets + list input
 await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
-await send('Page.navigate', { url: URL.split('?')[0] + '#/tool/new-greeting' });
+await send('Page.navigate', { url: URL.split('?')[0] + '#/tool/contosoops.new-greeting' });
 await waitFor(`!!document.querySelector('#f-Name')`);
 await evaluate(`document.querySelector('#f-Name').value='Ada'; const t=document.querySelector('#f-Tags'); t.value='x, y'; t.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter'})); document.querySelector('#f-ApiKey').value='k3y'; document.querySelector('#f-Login').value='ada'`);
 check('list input makes chips', await evaluate(`document.querySelectorAll('.tag').length === 2`));
@@ -107,7 +109,7 @@ await shot('e2e-console-dark');
 
 // mobile layout
 await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-await send('Page.navigate', { url: URL.split('?')[0] + '#/tool/invoke-deployment' });
+await send('Page.navigate', { url: URL.split('?')[0] + '#/tool/contosoops.invoke-deployment' });
 await waitFor(`!!document.querySelector('#f-Environment')`);
 await sleep(300);
 check('no horizontal scroll on mobile', await evaluate(`document.documentElement.scrollWidth <= 390 && document.querySelector('.main').scrollWidth <= 390`));

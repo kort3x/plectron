@@ -139,3 +139,26 @@ Describe 'Read-PlxEventChunk' {
         $r2.Lines | Should -Be @('{"b":2}')
     }
 }
+
+Describe 'command runs' {
+    BeforeAll {
+        $script:projectDir = Join-Path $PSScriptRoot 'fixtures/project'
+        $script:cstate = New-PlxState -Project (Read-PlxProjectConfig -Path (Join-Path $projectDir 'plectron.psd1')) -HistoryRoot (Join-Path $TestDrive 'cruns')
+    }
+    It 'imports the module, runs setup and calls the command in the project root' {
+        $tool = Find-PlxCatalogTool -State $cstate -Id 'fixturetools.invoke-echo'
+        $meta = Start-PlxRun -State $cstate -Tool $tool -Values @{ Text = 'hi'; Secret = 's' }
+        (Wait-PlxRun -State $cstate -Id $meta.id -TimeoutSec 60).status | Should -Be 'succeeded'
+        $out = @(Get-Events $cstate $meta.id | Where-Object t -eq 'output').data
+        $out | Should -Contain 'hi'
+        $out | Should -Contain 'setup:yes'
+        $out | Should -Contain "cwd:$((Resolve-Path $projectDir).Path)"
+        $out | Should -Contain 'secret:s'
+    }
+    It 'binds the chosen parameter set' {
+        $tool = Find-PlxCatalogTool -State $cstate -Id 'fixturetools.get-widget'
+        $meta = Start-PlxRun -State $cstate -Tool $tool -Values @{ Id = 7 }
+        $null = Wait-PlxRun -State $cstate -Id $meta.id -TimeoutSec 60
+        (Get-Events $cstate $meta.id | Where-Object t -eq 'output').data.Set | Should -Be 'ById'
+    }
+}

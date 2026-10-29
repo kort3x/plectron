@@ -28,3 +28,20 @@ jobs:
           $PSVersionTable | Out-String
           Import-Module Pester -MinimumVersion 5.5
           Invoke-Pester ./tests -CI
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches module version
+        shell: pwsh
+        run: |
+          $version = (Import-PowerShellDataFile ./Plectron/Plectron.psd1).ModuleVersion
+          if ("v$version" -ne '${{ github.ref_name }}') { throw "Tag ${{ github.ref_name }} does not match ModuleVersion $version" }
+      - name: Publish to the PowerShell Gallery
+        shell: pwsh
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+        run: Publish-Module -Path ./Plectron -NuGetApiKey $env:PSGALLERY_API_KEY -Verbose

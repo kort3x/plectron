@@ -4,7 +4,7 @@
 $script:PlxContentTypes = @{
     '.html' = 'text/html; charset=utf-8'; '.js' = 'text/javascript; charset=utf-8'
     '.css' = 'text/css; charset=utf-8'; '.svg' = 'image/svg+xml'; '.json' = 'application/json'
-    '.png' = 'image/png'; '.ico' = 'image/x-icon'; '.woff2' = 'font/woff2'
+    '.png' = 'image/png'; '.ico' = 'image/x-icon'; '.woff2' = 'font/woff2'; '.jpg' = 'image/jpeg'; '.jpeg' = 'image/jpeg'; '.webp' = 'image/webp'
 }
 
 function Get-PlxFreePort {
@@ -190,17 +190,26 @@ function Invoke-PlxApi {
         $version = (Import-PowerShellDataFile -LiteralPath $manifest).ModuleVersion
         $engine = $null
         try { $engine = Resolve-PlxEngine -Preferred $State.Engine } catch { $engine = $null }
-        Send-PlxJson $Response @{ version = $version; engine = $engine; root = $State.Root; platform = [Environment]::OSVersion.Platform.ToString() }
+        Send-PlxJson $Response @{
+            version = $version; engine = $engine; root = $State.Root; platform = [Environment]::OSVersion.Platform.ToString()
+            title = $State.Project.Title; accent = $State.Project.Accent; logo = [bool]$State.Project.Logo
+        }
+        return
+    }
+
+    if ($resource -eq 'logo' -and $Method -eq 'GET') {
+        if (-not $State.Project.Logo) { Send-PlxError $Response 404 'No logo configured.'; return }
+        Send-PlxFile -Response $Response -Path $State.Project.Logo
         return
     }
 
     if ($resource -eq 'tools' -and $Method -eq 'GET') {
         if (-not $id) {
-            $tools = @(Get-PlxTools -Root $State.Root -Cache $State.ToolCache | ForEach-Object { ConvertTo-PlxPublicTool $_ -Summary })
+            $tools = @(Get-PlxCatalog -State $State | ForEach-Object { ConvertTo-PlxPublicTool $_ -Summary })
             Send-PlxJson $Response $tools
             return
         }
-        $tool = Find-PlxTool -Root $State.Root -Cache $State.ToolCache -Id $id
+        $tool = Find-PlxCatalogTool -State $State -Id $id
         if (-not $tool) { Send-PlxError $Response 404 "Tool '$id' not found."; return }
         Send-PlxJson $Response (ConvertTo-PlxPublicTool $tool)
         return
@@ -219,7 +228,7 @@ function Invoke-PlxApi {
             if ($Method -eq 'POST') {
                 $body = Read-PlxRequestJson $Request
                 $tool = $null
-                if ($body -and $body.toolId) { $tool = Find-PlxTool -Root $State.Root -Cache $State.ToolCache -Id ([string]$body.toolId) }
+                if ($body -and $body.toolId) { $tool = Find-PlxCatalogTool -State $State -Id ([string]$body.toolId) }
                 if (-not $tool) { Send-PlxError $Response 404 'Tool not found.'; return }
                 try { $meta = Start-PlxRun -State $State -Tool $tool -Values $body.parameters }
                 catch { Send-PlxError $Response 400 $_.Exception.Message; return }
@@ -314,11 +323,16 @@ function Send-PlxStatic {
         Send-PlxResponse -Response $Response -Status 404 -Body 'Not found.'
         return
     }
-    $type = $script:PlxContentTypes[[IO.Path]::GetExtension($full).ToLowerInvariant()]
+    Send-PlxFile -Response $Response -Path $full
+}
+
+function Send-PlxFile {
+    param($Response, [string]$Path)
+    $type = $script:PlxContentTypes[[IO.Path]::GetExtension($Path).ToLowerInvariant()]
     if (-not $type) { $type = 'application/octet-stream' }
     $Response.Headers['Cache-Control'] = 'no-cache'
     $Response.Headers['Content-Security-Policy'] = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
-    $bytes = [IO.File]::ReadAllBytes($full)
+    $bytes = [IO.File]::ReadAllBytes($Path)
     $Response.StatusCode = 200
     $Response.ContentType = $type
     $Response.ContentLength64 = $bytes.Length

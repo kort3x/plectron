@@ -1,6 +1,6 @@
 import { h, clear } from './dom.js';
 import { api, AuthError } from './api.js';
-import { avatar, store } from './util.js';
+import { avatar, store, logoUrl } from './util.js';
 import { homeView, toolView, historyView, groupTools } from './views.js';
 import { runView } from './run.js';
 
@@ -49,7 +49,9 @@ async function route() {
   const host = h('div');
   try {
     let result;
+    const single = ctx.tools.length === 1 ? ctx.tools[0].id : null;
     if (parts[0] === 'tool' && parts[1]) result = await toolView(host, parts[1], query, ctx);
+    else if (single && parts[0] !== 'run' && parts[0] !== 'history') result = await toolView(host, single, query, ctx);
     else if (parts[0] === 'run' && parts[1]) result = await runView(host, parts[1], ctx);
     else if (parts[0] === 'history') result = await historyView(host, ctx);
     else result = await homeView(host, ctx);
@@ -68,6 +70,20 @@ function errorPage(err) {
     h('div', { class: 'big' }, err instanceof AuthError ? '🔒' : '⚠️'),
     h('p', null, err.message),
     err instanceof AuthError ? null : h('a', { class: 'btn', href: '#/' }, 'Back to tools')));
+}
+
+// Project branding from plectron.psd1: title, logo and accent colour.
+function applyBranding(info) {
+  const title = info.title || 'Plectron';
+  document.title = title;
+  document.querySelector('.brand span').textContent = title;
+  document.querySelector('.brand img').src = logoUrl(info);
+  document.querySelector('link[rel="icon"]').href = logoUrl(info);
+  if (info.accent) {
+    const root = document.documentElement.style;
+    root.setProperty('--accent', info.accent);
+    root.setProperty('--accent-soft', `color-mix(in srgb, ${info.accent} 16%, transparent)`);
+  }
 }
 
 function applyTheme(theme) {
@@ -104,7 +120,9 @@ async function start() {
   setupChrome();
   try {
     ctx.info = await api.info();
+    applyBranding(ctx.info);
     await loadTools();
+    appEl.classList.toggle('single', ctx.tools.length === 1);
     const engine = (ctx.info.engine || '').split(/[\\/]/).pop();
     document.getElementById('sidebar-foot').textContent = `v${ctx.info.version} · ${engine} · ${ctx.info.root}`;
     document.getElementById('sidebar-foot').title = ctx.info.root;

@@ -16,6 +16,10 @@ export function avatar(tool, large = false) {
   return h('span', { class: cls, style, 'aria-hidden': 'true' }, initials);
 }
 
+export function logoUrl(info) {
+  return info && info.logo ? '/api/logo' : 'logo.svg';
+}
+
 export function relTime(iso) {
   if (!iso) return '';
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;

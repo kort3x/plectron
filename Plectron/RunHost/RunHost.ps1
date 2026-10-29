@@ -23,9 +23,22 @@ if ($job.secure) {
 }
 
 # *>&1 merges every stream except Progress into Output, preserving order.
+# A job runs either a script file or an exported command of a module, after
+# the project's optional setup script.
+$runner = @'
+param($__job, $__a)
+$global:LASTEXITCODE = 0
+if ($__job.setup) { . $__job.setup }
+if ($__job.kind -eq 'command') {
+    $__m = Import-Module $__job.module -PassThru -ErrorAction Stop | Select-Object -First 1
+    & (Get-Command -Module $__m.Name -Name $__job.command -ErrorAction Stop) @__a *>&1
+} else {
+    Set-Location -LiteralPath ([IO.Path]::GetDirectoryName($__job.scriptPath))
+    & $__job.scriptPath @__a *>&1
+}
+'@
 $ps = [powershell]::Create()
-$null = $ps.AddScript('param($__p, $__a) $global:LASTEXITCODE = 0; Set-Location -LiteralPath ([IO.Path]::GetDirectoryName($__p)); & $__p @__a *>&1')
-$null = $ps.AddArgument([string]$job.scriptPath).AddArgument($arguments)
+$null = $ps.AddScript($runner).AddArgument($job).AddArgument($arguments)
 $output = New-Object 'System.Management.Automation.PSDataCollection[psobject]'
 $inputData = New-Object 'System.Management.Automation.PSDataCollection[psobject]'
 $inputData.Complete()

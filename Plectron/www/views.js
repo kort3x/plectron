@@ -1,6 +1,6 @@
 import { h, clear, svg, icons, toast } from './dom.js';
 import { api } from './api.js';
-import { avatar, relTime, duration, statusPill, formatParams } from './util.js';
+import { avatar, relTime, duration, statusPill, formatParams, logoUrl } from './util.js';
 import { buildForm } from './form.js';
 
 export async function homeView(main, { tools, info }) {
@@ -8,9 +8,9 @@ export async function homeView(main, { tools, info }) {
   const groups = groupTools(tools);
   main.append(h('div', { class: 'page' },
     h('section', { class: 'hero' },
-      h('img', { src: 'logo.svg', width: 56, height: 56, alt: '' }),
+      h('img', { src: logoUrl(info), width: 56, height: 56, alt: '' }),
       h('div', null,
-        h('h1', null, 'Your PowerShell toolbox'),
+        h('h1', null, info.title && info.title !== 'Plectron' ? info.title : 'Your PowerShell toolbox'),
         h('p', null, `${tools.length} tool${tools.length === 1 ? '' : 's'} from `, h('code', null, info.root || ''), '. Pick one, fill in the form, and watch it run.'))),
     runs.length ? [
       h('h2', { class: 'section-title' }, 'Recent runs'),
@@ -38,7 +38,8 @@ export async function toolView(main, id, query, { navigate }) {
     h('div', { class: 'titles' },
       h('div', { class: 'crumbs' }, h('a', { href: '#/' }, 'Tools'), tool.category ? ` / ${tool.category}` : ''),
       h('h1', null, tool.title),
-      tool.synopsis ? h('div', { class: 'sub' }, tool.synopsis) : null));
+      tool.synopsis ? h('div', { class: 'sub' }, tool.synopsis) : null,
+      tool.command ? h('code', { class: 'cmd-name', title: 'PowerShell command' }, `${tool.module}\\${tool.command}`) : null));
 
   let body;
   if (tool.parseError) {

@@ -193,15 +193,16 @@ function Invoke-PlxRunPump {
     $ended = [DateTime]::UtcNow
     $duration = [long]($ended - $started).TotalMilliseconds
     try {
-        Add-PlxEventLine $writer 'end' ([ordered]@{ status = $status; exitCode = $exitCode; durationMs = $duration })
-        $writer.Dispose()
+        # Final meta first: anyone who has seen 'end' must also see the final status.
         $meta = Read-PlxRunMeta -Dir $RunDir
         $meta.status = $status
         $meta.exitCode = $exitCode
         $meta.endedAt = $ended.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
         $meta.durationMs = $duration
         Save-PlxRunMeta -Dir $RunDir -Meta $meta
+        Add-PlxEventLine $writer 'end' ([ordered]@{ status = $status; exitCode = $exitCode; durationMs = $duration })
     } finally {
+        $writer.Dispose()
         $Entry.Status = $status
         $Entry.Done = $true
     }
@@ -222,6 +223,12 @@ function Stop-PlxRun {
     param([Parameter(Mandatory)][hashtable]$State, [Parameter(Mandatory)][string]$Id)
     $entry = $State.Runs[$Id]
     if (-not $entry -or $entry.Done) { return $false }
+    if ($entry.Process -and $entry.Process.HasExited) {
+        # Already finished; the pump is only recording the result.
+        $deadline = [DateTime]::UtcNow.AddSeconds(5)
+        while (-not $entry.Done -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 20 }
+        return $false
+    }
     $entry.Cancelled = $true
     $deadline = [DateTime]::UtcNow.AddSeconds(5)
     while (-not $entry.Process -and -not $entry.Done -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 50 }

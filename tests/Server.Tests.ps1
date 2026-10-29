@@ -110,7 +110,11 @@ Describe 'static files' {
         $r.Response.Content.Headers.ContentType.MediaType | Should -Be 'text/javascript'
     }
     It 'blocks path traversal' {
-        (Send GET '/..%2FPrivate%2FState.ps1').Status | Should -Be 404
-        (Send GET '/../Private/State.ps1').Status | Should -Be 404
+        # http.sys on Windows rejects encoded traversal itself with 403 before Plectron sees it.
+        foreach ($path in '/..%2FPrivate%2FState.ps1', '/../Private/State.ps1') {
+            $r = Send GET $path
+            $r.Status | Should -BeIn @(403, 404)
+            $r.Text | Should -Not -Match 'function New-PlxState'
+        }
     }
 }

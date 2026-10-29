@@ -3,7 +3,8 @@ import { api } from './api.js';
 import { avatar, relTime, duration, statusPill, formatParams, logoUrl } from './util.js';
 import { buildForm } from './form.js';
 
-export async function homeView(main, { tools, info }) {
+export async function homeView(main, ctx) {
+  const { tools, info } = ctx;
   const runs = await api.runs(6).catch(() => []);
   const groups = groupTools(tools);
   main.append(h('div', { class: 'page' },
@@ -11,7 +12,13 @@ export async function homeView(main, { tools, info }) {
       h('img', { src: logoUrl(info), width: 56, height: 56, alt: '' }),
       h('div', null,
         h('h1', null, info.title && info.title !== 'Plectron' ? info.title : 'Your PowerShell toolbox'),
-        h('p', null, `${tools.length} tool${tools.length === 1 ? '' : 's'} from `, h('code', null, info.root || ''), '. Pick one, fill in the form, and watch it run.'))),
+        h('p', null, `${tools.length} tool${tools.length === 1 ? '' : 's'}${ctx.pages.length ? ` and ${ctx.pages.length} page${ctx.pages.length === 1 ? '' : 's'}` : ''} from `, h('code', null, info.root || ''), '. Pick one, fill in the form, and watch it run.'))),
+    ctx.pages && ctx.pages.length ? [
+      h('h2', { class: 'section-title' }, 'Pages'),
+      h('div', { class: 'tool-grid' }, ctx.pages.map((p) => h('a', { class: 'card tool-card', href: `#/page/${encodeURIComponent(p.id)}` },
+        avatar({ id: `page-${p.id}`, title: p.title, icon: 'columns' }),
+        h('div', { style: { minWidth: 0 } }, h('div', { class: 't' }, p.title), h('div', { class: 'd' }, p.description || 'Custom page'))))),
+    ] : null,
     runs.length ? [
       h('h2', { class: 'section-title' }, 'Recent runs'),
       h('div', { class: 'card' }, h('div', { class: 'mini-runs', style: { padding: '8px' } }, runs.map(miniRun))),
@@ -22,7 +29,7 @@ export async function homeView(main, { tools, info }) {
         avatar(t),
         h('div', { style: { minWidth: 0 } }, h('div', { class: 't' }, t.title), h('div', { class: 'd' }, t.parseError ? 'Has errors — open for details' : (t.synopsis || 'No description')))))),
     ]),
-    tools.length ? null : h('div', { class: 'card empty-state' }, h('div', { class: 'big' }, '📂'), 'No .ps1 scripts found in this folder.')));
+    tools.length || ctx.pages.length ? null : h('div', { class: 'card empty-state' }, h('div', { class: 'big' }, '📂'), 'No .ps1 scripts found in this folder.')));
 }
 
 export async function toolView(main, id, query, { navigate }) {

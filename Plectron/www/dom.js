@@ -76,8 +76,8 @@ export const icons = {
   package: ['M3 7l9-4 9 4v10l-9 4-9-4z', 'M3 7l9 4 9-4', 'M12 11v10'],
 };
 
-export function toast(message) {
-  const t = h('div', { class: 'toast', role: 'status' }, message);
+export function toast(message, level = 'info') {
+  const t = h('div', { class: `toast ${level}`, role: level === 'error' ? 'alert' : 'status' }, message);
   document.body.append(t);
   setTimeout(() => t.remove(), 2600);
 }

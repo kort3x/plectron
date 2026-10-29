@@ -26,4 +26,12 @@ export const api = {
   startRun: (toolId, parameters) => request('POST', '/api/runs', { toolId, parameters }),
   deleteRun: (id) => request('DELETE', `/api/runs/${encodeURIComponent(id)}`),
   events: (id) => new EventSource(`/api/runs/${encodeURIComponent(id)}/events`),
+  pages: () => request('GET', '/api/pages'),
+  createSession: (pageId) => request('POST', `/api/pages/${encodeURIComponent(pageId)}/sessions`, {}),
+  sessionEvents: (sid) => new EventSource(`/api/sessions/${sid}/events`),
+  invoke: (sid, body) => request('POST', `/api/sessions/${sid}/invoke`, body),
+  refresh: (sid, body) => request('POST', `/api/sessions/${sid}/refresh`, body),
+  cancel: (sid) => request('POST', `/api/sessions/${sid}/cancel`, {}),
+  closeSession: (sid) => fetch(`/api/sessions/${sid}`, { method: 'DELETE', credentials: 'same-origin', keepalive: true }).catch(() => {}),
+  closeSessionOnUnload: (sid) => navigator.sendBeacon(`/api/sessions/${sid}/close`),
 };

@@ -6,6 +6,7 @@
     Accent   = '#0a7cff'
     Modules  = @('./src/ContosoOps/ContosoOps.psd1')
     Scripts  = @('./scripts')
+    Pages    = @('./pages')
     Setup    = './dev/Initialize.ps1'
     Commands = @{
         'Get-FolderSize'   = @{ Title = 'Folder sizes'; Icon = 'disk'; Parameters = @{ Path = @{ Placeholder = '~/Downloads' } } }

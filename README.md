@@ -49,6 +49,7 @@ Get-Command -Module MyTools -Verb Get | Show-Plectron
     Accent   = '#0a7cff'
     Modules  = @('./src/ContosoOps/ContosoOps.psd1')
     Scripts  = @('./scripts')                # loose scripts can sit next to the module
+    Pages    = @('./pages')                  # custom pages (see below)
     Include  = @('*')                        # wildcards on command/script names
     Exclude  = @('*-Internal*')
     Setup    = './dev/Initialize.ps1'        # runs before every tool
@@ -74,6 +75,62 @@ Your users then get a UI without needing to know Plectron exists.
 | PowerShell Gallery | `Install-Module Plectron`. List it under `RequiredModules`, or import it only in your UI helper. |
 | Copy into the repo | Copy the `Plectron/` folder (no dependencies) to e.g. `tools/Plectron`, then `Import-Module ./tools/Plectron`. |
 | Git submodule | `git submodule add https://github.com/kort3x/plectron tools/plectron`, then `Import-Module ./tools/plectron/Plectron`. |
+
+## Custom pages
+
+When a generated form isn't enough, build a page in PowerShell: tables of live
+objects, buttons that act on the selected rows, inputs, charts and output panels.
+
+```powershell
+New-PlxPage -Title 'Task manager' {
+    New-PlxTextBox -Name Filter -Label 'Name contains' -Refresh Processes
+    New-PlxTable -Name Processes -Property Name, Id, CPU, WorkingSet -ScriptBlock {
+        Get-Process | Where-Object Name -like "*$Filter*"
+    }
+    New-PlxButton 'End task' -Variant Danger -Confirm 'End the selected processes?' -Refresh Processes -ScriptBlock {
+        $Processes | Stop-Process          # the real, selected Process objects
+        Show-PlxMessage "Ended $(@($Processes).Count) process(es)." -Level Success
+    }
+}
+```
+
+Save a page as a `.ps1` file in a `pages/` folder and add `Pages = @('./pages')`
+to `plectron.psd1`. You can also serve page files with `Start-Plectron -Page ./TaskManager.ps1`,
+or open a page straight from the console with `Show-PlxPage { New-PlxPage … }`.
+The `.SYNOPSIS` of a page file is used as its description in the sidebar.
+
+**Variables:**
+- Every control has a `-Name`, and inside an action or data `-ScriptBlock` its
+  value is the variable of that name:
+  - a table: its selected rows, as the original objects;
+  - a text box, drop-down or number: its value;
+  - a checkbox: `$true` or `$false`.
+- `$Selected` is a shortcut when the page has a single table.
+- `-Refresh <names>` re-runs those tables, charts or drop-downs after an action
+  succeeds, or when an input changes.
+
+**Lifetime:**
+- Each open page gets its own PowerShell process (with the project's `Setup`,
+  `Modules` and `Engine`). It runs the page file once, and keeps the page's
+  variables and objects until the tab is closed. Use `$script:` variables for state
+  that actions change.
+- Only one action runs at a time per page, and **Cancel** stops it.
+- A page nobody is viewing is closed after two minutes.
+- Page actions are not recorded in run history.
+
+| Command | |
+|---|---|
+| `New-PlxPage [-Title] [-Description] {…}` | The page itself. |
+| `New-PlxRow {…}`, `New-PlxColumn [-Width] {…}`, `New-PlxCard [-Title] {…}`, `New-PlxTabs { New-PlxTab 'Name' {…} }` | Layout. |
+| `New-PlxTable -Name (-ScriptBlock \| -InputObject) [-Property] [-Selection None\|Single\|Multiple] [-AutoRefresh <s>] [-Title]` | Sortable, filterable table with row selection. |
+| `New-PlxChart -Name -X <prop> -Y <prop[]> [-Type Bar\|Line] (-ScriptBlock \| -InputObject) [-Title]` | Bar or line chart (up to four series), with a table view. |
+| `New-PlxTextBox`, `New-PlxDropdown (-Options \| -ScriptBlock)`, `New-PlxCheckbox`, `New-PlxNumber [-Min] [-Max]` | Inputs; all take `-Name -Label -Default -Refresh`. |
+| `New-PlxButton <Text> -ScriptBlock [-Refresh] [-Confirm <question>] [-Variant Default\|Primary\|Danger] [-Output <name>]` | Runs an action in the page process. |
+| `New-PlxText <text> [-Markdown]`, `New-PlxOutput -Name [-Title]` | Text, and a console panel for action output. |
+| `Show-PlxMessage <text> [-Level Info\|Success\|Warning\|Error]` | Inside an action: show a toast. |
+
+See [`examples/ContosoOps/pages`](examples/ContosoOps/pages) for a task manager
+and a dashboard with charts.
 
 ## How a command becomes a form
 
@@ -157,8 +214,9 @@ newest `-HistoryLimit` runs are kept (default 200).
 
 | Command | |
 |---|---|
-| `Start-Plectron [[-Path] <dir>] [-Module <path\|name>[]] [-Config <file>] [-Title] [-Port] [-Engine] [-HistoryPath] [-HistoryLimit] [-NoBrowser] [-PassThru]` | Start serving. `-PassThru` returns at once instead of blocking. |
+| `Start-Plectron [[-Path] <dir>] [-Module <path\|name>[]] [-Config <file>] [-Page <file>[]] [-Title] [-Port] [-Engine] [-HistoryPath] [-HistoryLimit] [-NoBrowser] [-PassThru]` | Start serving. `-PassThru` returns at once instead of blocking. |
 | `Show-Plectron [-Command] <name\|CommandInfo>[]` | Serve just these module commands (accepts pipeline input). |
+| `Show-PlxPage { New-PlxPage … }` | Open an ad-hoc custom page. |
 | `Stop-Plectron [-Server]` | Stop one server, or all of them. Running tools are cancelled. |
 | `Get-Plectron` | List the servers running in this session. |
 
@@ -184,6 +242,8 @@ Layout:
 - `Plectron/Private/Discovery.ps1`: param blocks, help and cmdlet metadata → tool schemas
 - `Plectron/RunHost/Describe.ps1`: child-side module describer
 - `Plectron/RunHost/RunHost.ps1`: child-side host; streams → protocol events
+- `Plectron/Public/Page.ps1`, `Private/PageModel.ps1`, `RunHost/PageHost.ps1`: custom pages (DSL, model, page process)
+- `Plectron/Private/Pages.ps1`: page discovery and page sessions
 - `Plectron/Private/Runner.ps1`, `History.ps1`: start, cancel and record runs
 - `Plectron/Private/Server.ps1`: HTTP API, SSE, auth and static files
 - `Plectron/www/`: the UI (vanilla JS modules, no build step)

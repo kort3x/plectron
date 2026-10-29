@@ -3,12 +3,13 @@ import { api, AuthError } from './api.js';
 import { avatar, store, logoUrl } from './util.js';
 import { homeView, toolView, historyView, groupTools } from './views.js';
 import { runView } from './run.js';
+import { pageView } from './page.js';
 
 const main = document.getElementById('main');
 const list = document.getElementById('tool-list');
 const search = document.getElementById('search');
 const appEl = document.querySelector('.app');
-const ctx = { tools: [], info: {}, navigate };
+const ctx = { tools: [], pages: [], info: {}, navigate };
 let cleanup = null;
 let renderToken = 0;
 
@@ -18,16 +19,24 @@ function navigate(hash) {
 }
 
 async function loadTools() {
-  ctx.tools = await api.tools();
+  [ctx.tools, ctx.pages] = await Promise.all([api.tools(), api.pages()]);
   renderSidebar();
 }
 
 function renderSidebar() {
   const q = search.value.trim().toLowerCase();
-  const current = decodeURIComponent((location.hash.match(/^#\/tool\/([^?]+)/) || [])[1] || '');
-  const tools = ctx.tools.filter((t) => !q || [t.title, t.synopsis, t.category, t.id].some((s) => s && s.toLowerCase().includes(q)));
+  const current = decodeURIComponent((location.hash.match(/^#\/(?:tool|page)\/([^?]+)/) || [])[1] || '');
+  const matches = (...fields) => !q || fields.some((s) => s && s.toLowerCase().includes(q));
+  const tools = ctx.tools.filter((t) => matches(t.title, t.synopsis, t.category, t.id));
+  const pages = ctx.pages.filter((p) => matches(p.title, p.description, p.id));
   clear(list);
-  if (!tools.length) { list.append(h('div', { class: 'empty-list' }, q ? 'No matching tools.' : 'No tools found.')); return; }
+  if (!tools.length && !pages.length) { list.append(h('div', { class: 'empty-list' }, q ? 'No matching tools.' : 'No tools found.')); return; }
+  if (pages.length) {
+    list.append(h('div', { class: 'tool-group' },
+      h('h4', null, 'Pages'),
+      pages.map((p) => h('a', { class: `tool-link${p.id === current ? ' active' : ''}`, href: `#/page/${encodeURIComponent(p.id)}`, title: p.description || p.title },
+        avatar({ id: `page-${p.id}`, title: p.title, icon: 'columns' }), h('span', { class: 'name' }, p.title)))));
+  }
   for (const [cat, items] of groupTools(tools)) {
     list.append(h('div', { class: 'tool-group' },
       h('h4', null, cat),
@@ -49,9 +58,12 @@ async function route() {
   const host = h('div');
   try {
     let result;
-    const single = ctx.info.single && ctx.tools.length === 1 ? ctx.tools[0].id : null;
+    const singleTool = ctx.info.single && ctx.tools.length === 1 && !ctx.pages.length ? ctx.tools[0].id : null;
+    const singlePage = ctx.info.single && ctx.pages.length === 1 && !ctx.tools.length ? ctx.pages[0].id : null;
     if (parts[0] === 'tool' && parts[1]) result = await toolView(host, parts[1], query, ctx);
-    else if (single && parts[0] !== 'run' && parts[0] !== 'history') result = await toolView(host, single, query, ctx);
+    else if (parts[0] === 'page' && parts[1]) result = await pageView(host, parts[1], ctx);
+    else if (singleTool && parts[0] !== 'run' && parts[0] !== 'history') result = await toolView(host, singleTool, query, ctx);
+    else if (singlePage && parts[0] !== 'run' && parts[0] !== 'history') result = await pageView(host, singlePage, ctx);
     else if (parts[0] === 'run' && parts[1]) result = await runView(host, parts[1], ctx);
     else if (parts[0] === 'history') result = await historyView(host, ctx);
     else result = await homeView(host, ctx);

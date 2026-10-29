@@ -14,6 +14,11 @@ Describe 'ConvertFrom-PlxJson' {
         $r.ContainsKey('n') | Should -BeTrue
         $r.n | Should -BeNullOrEmpty
     }
+    It 'keeps ISO date strings as strings on every engine' {
+        $r = ConvertFrom-PlxJson '{"d":"2025-12-01T10:00:00.0000000Z"}'
+        $r.d | Should -BeOfType [string]
+        $r.d | Should -Match '^2025-12-01T10:00:00'
+    }
     It 'keeps single-element arrays as arrays' {
         $r = ConvertFrom-PlxJson '{"d":["only"]}'
         , $r.d | Should -BeOfType [object[]]

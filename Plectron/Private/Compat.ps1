@@ -1,8 +1,11 @@
 # Helpers that behave identically on Windows PowerShell 5.1 and PowerShell 7+.
 
+$script:PlxJsonDateKind = (Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')
+
 function ConvertTo-PlxHashtable {
     param($InputObject)
     if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [datetime]) { return $InputObject.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture) }
     if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
         $h = @{}
         foreach ($p in $InputObject.PSObject.Properties) { $h[$p.Name] = ConvertTo-PlxHashtable $p.Value }
@@ -25,7 +28,10 @@ function ConvertFrom-PlxJson {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Json)
     if ([string]::IsNullOrWhiteSpace($Json)) { return $null }
     # ConvertFrom-Json -AsHashtable does not exist on 5.1; normalise PSCustomObject instead.
-    $obj = ConvertFrom-Json -InputObject $Json
+    # PowerShell 7 turns ISO date strings into DateTime; keep them as strings
+    # like 5.1 does (-DateKind String on 7.5+, re-formatting on older 7.x).
+    if ($script:PlxJsonDateKind) { $obj = ConvertFrom-Json -InputObject $Json -DateKind String }
+    else { $obj = ConvertFrom-Json -InputObject $Json }
     return , (ConvertTo-PlxHashtable $obj)
 }
 

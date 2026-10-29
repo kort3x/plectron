@@ -5,9 +5,14 @@ function New-PlxRunId {
     return (Get-Date).ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture) + '-' + $suffix
 }
 
+function Test-PlxRunId {
+    param([AllowNull()][string]$Id)
+    return $Id -match '^\d{8}-\d{6}-[0-9a-f]{6}$'
+}
+
 function Get-PlxRunDir {
     param([Parameter(Mandatory)][string]$HistoryRoot, [Parameter(Mandatory)][string]$Id)
-    if ($Id -notmatch '^\d{8}-\d{6}-[0-9a-f]{6}$') { throw "Invalid run id '$Id'" }
+    if (-not (Test-PlxRunId $Id)) { throw "Invalid run id '$Id'" }
     return Join-Path $HistoryRoot $Id
 }
 
@@ -16,8 +21,9 @@ function Save-PlxRunMeta {
     $path = Join-Path $Dir 'meta.json'
     $tmp = "$path.tmp"
     [IO.File]::WriteAllText($tmp, (ConvertTo-PlxJson $Meta), (New-Object System.Text.UTF8Encoding $false))
-    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
-    Move-Item -LiteralPath $tmp -Destination $path -Force
+    # Replace atomically so concurrent readers never see a missing file.
+    if (Test-Path -LiteralPath $path) { [IO.File]::Replace($tmp, $path, [NullString]::Value) }
+    else { [IO.File]::Move($tmp, $path) }
 }
 
 function Read-PlxRunMeta {
@@ -41,6 +47,14 @@ function Repair-PlxRunStatus {
     return $Meta
 }
 
+function ConvertTo-PlxSortableTime {
+    param($Value)
+    $parsed = [datetimeoffset]::MinValue
+    $styles = [Globalization.DateTimeStyles]::AssumeUniversal
+    if ([datetimeoffset]::TryParse([string]$Value, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$parsed)) { return $parsed.UtcTicks }
+    return 0
+}
+
 function Get-PlxRuns {
     param([Parameter(Mandatory)][string]$HistoryRoot, [int]$Limit = 0)
     if (-not (Test-Path -LiteralPath $HistoryRoot)) { return }
@@ -48,7 +62,7 @@ function Get-PlxRuns {
         $m = Read-PlxRunMeta -Dir $d.FullName
         if ($m) { $m }
     }
-    $sorted = @($metas | Sort-Object { [string]$_.startedAt } -Descending)
+    $sorted = @($metas | Sort-Object { ConvertTo-PlxSortableTime $_.startedAt } -Descending)
     if ($Limit -gt 0 -and $sorted.Count -gt $Limit) { $sorted = $sorted[0..($Limit - 1)] }
     return $sorted
 }

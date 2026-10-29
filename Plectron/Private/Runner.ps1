@@ -36,13 +36,18 @@ function ConvertTo-PlxJob {
         if ($v -is [array] -and $v.Count -eq 0) { continue }
         if ($def.type -eq 'switch' -and -not [bool]$v) { continue }
 
-        if ($def.widget -eq 'password') {
+        # The declared type decides how a value is passed; a 'password' widget
+        # on a plain string only masks it in the UI and history.
+        if ($def.type -eq 'securestring') {
             $job.secure[$name] = @{ kind = 'securestring'; password = [string]$v }
             $job.redacted[$name] = '***'
-        } elseif ($def.widget -eq 'credential') {
+        } elseif ($def.type -eq 'pscredential') {
             if ($v -isnot [hashtable] -or -not $v.user) { continue }
             $job.secure[$name] = @{ kind = 'credential'; user = [string]$v.user; password = [string]$v.password }
             $job.redacted[$name] = @{ user = [string]$v.user; password = '***' }
+        } elseif ($def.widget -eq 'password') {
+            $job.parameters[$name] = $v
+            $job.redacted[$name] = '***'
         } else {
             $job.parameters[$name] = $v
             $job.redacted[$name] = $v
@@ -55,8 +60,9 @@ function Write-PlxPrivateFile {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Content)
     [IO.File]::WriteAllText($Path, '')
     if (-not (Test-PlxWindows)) {
-        $setMode = [IO.File].GetMethod('SetUnixFileMode', [type[]]@([string], [IO.UnixFileMode]))
-        if ($setMode) { [IO.File]::SetUnixFileMode($Path, [IO.UnixFileMode]'UserRead, UserWrite') }
+        # UnixFileMode only exists on .NET 7+ (pwsh 7.4+); older engines use chmod.
+        $modeType = 'System.IO.UnixFileMode' -as [type]
+        if ($modeType) { [IO.File]::SetUnixFileMode($Path, [Enum]::Parse($modeType, 'UserRead, UserWrite')) }
         else { & chmod 600 $Path }
     }
     [IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding $false))

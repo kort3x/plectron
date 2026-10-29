@@ -92,19 +92,39 @@ function Send-PlxError {
 # Returns $null when the request may proceed, otherwise an HTTP status to reject with.
 function Test-PlxRequestAuth {
     param($Request, [hashtable]$State)
-    $port = $State.Port
-    $allowedHosts = @("localhost:$port", "127.0.0.1:$port", "[::1]:$port")
-    if ($allowedHosts -notcontains $Request.Headers['Host']) { return 403 }
+    if (-not (Test-PlxLocalHost -Request $Request -State $State)) { return 403 }
     $origin = $Request.Headers['Origin']
-    if ($origin -and @("http://localhost:$port", "http://127.0.0.1:$port", "http://[::1]:$port") -notcontains $origin) { return 403 }
+    if ($origin -and @(Get-PlxAllowedHosts -State $State | ForEach-Object { "http://$_" }) -notcontains $origin) { return 403 }
 
     $token = $Request.Headers['X-Plectron-Token']
     if (-not $token) {
         $cookie = $Request.Cookies['plx']
         if ($cookie) { $token = $cookie.Value }
     }
-    if ($token -ne $State.Token) { return 401 }
+    if (-not (Test-PlxToken -Candidate $token -State $State)) { return 401 }
     return $null
+}
+
+# Host headers we answer to. http.sys on Windows only routes 'localhost' to the
+# prefix; the loopback literals matter for the managed listener on macOS/Linux.
+function Get-PlxAllowedHosts {
+    param([hashtable]$State)
+    return @("localhost:$($State.Port)", "127.0.0.1:$($State.Port)", "[::1]:$($State.Port)")
+}
+
+function Test-PlxLocalHost {
+    param($Request, [hashtable]$State)
+    return (Get-PlxAllowedHosts -State $State) -contains $Request.Headers['Host']
+}
+
+# Ordinal, constant-time comparison (PowerShell's -eq is case-insensitive).
+function Test-PlxToken {
+    param([AllowNull()][string]$Candidate, [hashtable]$State)
+    $expected = [string]$State.Token
+    if (-not $Candidate -or $Candidate.Length -ne $expected.Length) { return $false }
+    $diff = 0
+    for ($i = 0; $i -lt $expected.Length; $i++) { $diff = $diff -bor ([int]$Candidate[$i] -bxor [int]$expected[$i]) }
+    return $diff -eq 0
 }
 
 function ConvertTo-PlxPublicTool {
@@ -134,8 +154,8 @@ function Invoke-PlxRequest {
 
         # First visit: exchange the token from the printed URL for a cookie.
         $queryToken = $req.QueryString['t']
-        if ($method -eq 'GET' -and $path -eq '/' -and $queryToken -and $queryToken -eq $State.Token -and
-            @("localhost:$($State.Port)", "127.0.0.1:$($State.Port)") -contains $req.Headers['Host']) {
+        if ($method -eq 'GET' -and $path -eq '/' -and (Test-PlxToken -Candidate $queryToken -State $State) -and
+            (Test-PlxLocalHost -Request $req -State $State)) {
             $res.Headers.Add('Set-Cookie', "plx=$($State.Token); Path=/; HttpOnly; SameSite=Strict")
             $res.Redirect('/')
             return
@@ -190,7 +210,8 @@ function Invoke-PlxApi {
         if (-not $id) {
             if ($Method -eq 'GET') {
                 $limit = 100
-                if ($Request.QueryString['limit']) { $limit = [int]$Request.QueryString['limit'] }
+                $requested = 0
+                if ([int]::TryParse([string]$Request.QueryString['limit'], [ref]$requested) -and $requested -gt 0) { $limit = $requested }
                 $runs = @(Get-PlxRuns -HistoryRoot $State.HistoryRoot -Limit $limit | ForEach-Object { Repair-PlxRunStatus -State $State -Meta $_ })
                 Send-PlxJson $Response $runs
                 return
@@ -206,7 +227,7 @@ function Invoke-PlxApi {
                 return
             }
         }
-        if ($id -notmatch '^\d{8}-\d{6}-[0-9a-f]{6}$') { Send-PlxError $Response 404 'Run not found.'; return }
+        if (-not (Test-PlxRunId $id)) { Send-PlxError $Response 404 'Run not found.'; return }
         $meta = Get-PlxRun -State $State -Id $id
         if (-not $meta) { Send-PlxError $Response 404 'Run not found.'; return }
 

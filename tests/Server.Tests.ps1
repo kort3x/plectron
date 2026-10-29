@@ -52,6 +52,9 @@ Describe 'auth' {
         $cookie | Should -Match 'SameSite=Strict'
         (Send GET '/api/tools' -NoToken -Headers @{ Cookie = "plx=$($server.Token)" }).Status | Should -Be 200
     }
+    It 'compares tokens case-sensitively' {
+        (Send GET '/api/tools' -NoToken -Headers @{ 'X-Plectron-Token' = $server.Token.ToUpperInvariant() }).Status | Should -Be 401
+    }
     It 'rejects foreign origins even with a token' {
         (Send GET '/api/tools' -Headers @{ Origin = 'http://evil.example' }).Status | Should -Be 403
     }
@@ -101,6 +104,9 @@ Describe 'runs API' {
         $list.Text | Should -Match '^\[\{'
         # replay after completion
         (Read-Sse $id).Events[-1].t | Should -Be 'end'
+    }
+    It 'ignores a malformed limit' {
+        (Send GET '/api/runs?limit=abc').Status | Should -Be 200
     }
     It 'rejects unknown parameters' {
         (Send POST '/api/runs' @{ toolId = 'streams'; parameters = @{ Bogus = 1 } }).Status | Should -Be 400

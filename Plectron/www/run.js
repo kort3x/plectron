@@ -166,7 +166,16 @@ export async function runView(main, id, { tools, navigate }) {
 
   function renderProgress() {
     clear(progressList);
-    const ordered = [...progress.values()].sort((a, b) => (a.parentId === b.id ? 1 : b.parentId === a.id ? -1 : a.id - b.id));
+    // Depth-first: each record directly followed by its children.
+    const ordered = [];
+    const visit = (parentId) => {
+      for (const p of [...progress.values()].filter((x) => x.parentId === parentId).sort((a, b) => a.id - b.id)) {
+        ordered.push(p);
+        visit(p.id);
+      }
+    };
+    const roots = new Set([...progress.values()].filter((p) => !progress.has(p.parentId)).map((p) => p.parentId));
+    for (const r of [...roots].sort((a, b) => a - b)) visit(r);
     for (const p of ordered) {
       const pct = p.percent >= 0 ? Math.min(100, p.percent) : null;
       const eta = p.secondsRemaining > 0 ? ` · ${duration(p.secondsRemaining * 1000)} left` : '';
@@ -196,6 +205,7 @@ export async function runView(main, id, { tools, navigate }) {
   return () => {
     disposed = true;
     es.close();
+    table.dispose();
     clearInterval(timer);
   };
 }
@@ -257,7 +267,8 @@ function createTable(host, getRows, getDisplay, exportName) {
   filterInput.addEventListener('input', () => { filter = filterInput.value.toLowerCase(); render(); });
   const menu = h('div', { class: 'menu', hidden: true });
   const colsBtn = h('button', { class: 'btn sm', onclick: (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; } }, svg(icons.columns, 14), 'Columns');
-  document.addEventListener('click', (e) => { if (!menu.contains(e.target)) menu.hidden = true; });
+  const closeMenu = (e) => { if (!menu.contains(e.target)) menu.hidden = true; };
+  document.addEventListener('click', closeMenu);
   const info = h('span', { class: 'hint' });
   const tableWrap = h('div', { class: 'table-wrap' });
 
@@ -346,7 +357,7 @@ function createTable(host, getRows, getDisplay, exportName) {
     download(`${exportName}.csv`, lines.join('\r\n'), 'text/csv');
   }
 
-  return { render };
+  return { render, dispose: () => document.removeEventListener('click', closeMenu) };
 }
 
 function cellText(v) {

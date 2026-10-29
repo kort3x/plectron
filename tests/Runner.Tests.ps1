@@ -29,6 +29,17 @@ Describe 'ConvertTo-PlxJob' {
         $j.redacted.Cred.password | Should -Be '***'
         $j.redacted.Name | Should -Be 'x'
     }
+    It 'decides secrecy by declared type, not by widget override' {
+        $tool = @{ id = 't'; parameters = @(
+                @{ name = 'Masked'; type = 'string'; widget = 'password' }
+                @{ name = 'Key'; type = 'securestring'; widget = 'textarea' }
+            ) }
+        $j = ConvertTo-PlxJob -Tool $tool -Values @{ Masked = 'm'; Key = 'k' }
+        $j.parameters.Masked | Should -Be 'm'
+        $j.redacted.Masked | Should -Be '***'
+        $j.secure.Key.password | Should -Be 'k'
+        $j.redacted.Key | Should -Be '***'
+    }
     It 'rejects unknown parameters' {
         { ConvertTo-PlxJob -Tool $basic -Values @{ Bogus = 1 } } | Should -Throw '*Bogus*'
     }
@@ -92,6 +103,18 @@ Describe 'history' {
         @(Get-PlxRuns -HistoryRoot $state.HistoryRoot).Count | Should -Be 2
         Remove-PlxRun -HistoryRoot $state.HistoryRoot -Id $ids[2]
         @(Get-PlxRuns -HistoryRoot $state.HistoryRoot).id | Should -Be @($ids[1])
+    }
+    It 'orders by start time across month boundaries' {
+        $state = New-State
+        foreach ($m in @(@{ id = '20251201-100000-aaaaaa'; startedAt = '2025-12-01T10:00:00.0000000Z' },
+                         @{ id = '20260115-100000-bbbbbb'; startedAt = '2026-01-15T10:00:00.0000000Z' })) {
+            $dir = Join-Path $state.HistoryRoot $m.id
+            $null = New-Item -ItemType Directory $dir -Force
+            Save-PlxRunMeta -Dir $dir -Meta @{ id = $m.id; startedAt = $m.startedAt; status = 'succeeded' }
+        }
+        (Get-PlxRuns -HistoryRoot $state.HistoryRoot)[0].id | Should -Be '20260115-100000-bbbbbb'
+        Limit-PlxHistory -HistoryRoot $state.HistoryRoot -Keep 1
+        @(Get-PlxRuns -HistoryRoot $state.HistoryRoot).id | Should -Be @('20260115-100000-bbbbbb')
     }
     It 'rejects ids that could escape the history folder' {
         { Get-PlxRunDir -HistoryRoot $TestDrive -Id '../etc' } | Should -Throw

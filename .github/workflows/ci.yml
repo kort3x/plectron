@@ -1,0 +1,30 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, shell: powershell }   # Windows PowerShell 5.1
+          - { os: windows-latest, shell: pwsh }
+          - { os: ubuntu-latest, shell: pwsh }
+          - { os: macos-latest, shell: pwsh }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test modules
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+      - name: Static checks
+        run: ./tools/Check.ps1
+      - name: Tests
+        run: |
+          $PSVersionTable | Out-String
+          Import-Module Pester -MinimumVersion 5.5
+          Invoke-Pester ./tests -CI

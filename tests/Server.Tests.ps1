@@ -1,4 +1,5 @@
 BeforeAll {
+    Add-Type -AssemblyName System.Net.Http
     Import-Module "$PSScriptRoot/../Plectron/Plectron.psd1" -Force
     Import-Module "$PSScriptRoot/../Plectron/Private/Plectron.Core.psm1" -Force
     $script:server = Start-Plectron -Path (Join-Path $PSScriptRoot 'fixtures/tools') -HistoryPath (Join-Path $TestDrive 'runs') -NoBrowser -PassThru
@@ -65,6 +66,7 @@ Describe 'tools API' {
         $r.Status | Should -Be 200
         $r.Json.id | Should -Contain 'basic'
         $r.Json.id | Should -Not -Contain 'hidden'
+        $r.Text | Should -Match '^\[\{'
     }
     It 'returns a tool schema' {
         $r = Send GET '/api/tools/basic'
@@ -94,7 +96,9 @@ Describe 'runs API' {
         $sse.Events[-1].data.status | Should -Be 'succeeded'
 
         (Send GET "/api/runs/$id").Json.status | Should -Be 'succeeded'
-        (Send GET '/api/runs').Json.id | Should -Contain $id
+        $list = Send GET '/api/runs'
+        $list.Json.id | Should -Contain $id
+        $list.Text | Should -Match '^\[\{'
         # replay after completion
         (Read-Sse $id).Events[-1].t | Should -Be 'end'
     }

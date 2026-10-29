@@ -109,6 +109,7 @@ function ConvertTo-PlxParameter {
         $p.defaultText = $Ast.DefaultValue.Extent.Text
         $isLiteral = $Ast.DefaultValue -is [System.Management.Automation.Language.ConstantExpressionAst] -or
             $Ast.DefaultValue -is [System.Management.Automation.Language.ArrayLiteralAst] -or
+            $Ast.DefaultValue -is [System.Management.Automation.Language.ArrayExpressionAst] -or
             ($Ast.DefaultValue -is [System.Management.Automation.Language.VariableExpressionAst] -and
             @('true', 'false', 'null') -contains $Ast.DefaultValue.VariablePath.UserPath)
         if ($isLiteral) { $p.default = ConvertTo-PlxValue (Get-PlxAttributeValue $Ast.DefaultValue) }

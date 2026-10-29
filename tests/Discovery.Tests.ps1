@@ -55,6 +55,7 @@ Describe 'Get-PlxTool' {
         (P $t 'Enabled').default | Should -BeTrue
     }
     It 'maps arrays to list' { (P $t 'Tags').widget | Should -Be 'list' }
+    It 'evaluates @() array defaults' { (P $t 'Tags').default | Should -Be @('one', 'two') }
     It 'maps datetime' { (P $t 'When').widget | Should -Be 'datetime' }
     It 'maps secrets' {
         (P $t 'Secret').widget | Should -Be 'password'

@@ -20,7 +20,7 @@ param(
 
     [switch]$Force,
 
-    [string[]]$Tags,
+    [string[]]$Tags = @('one', 'two'),
 
     [ValidateSet('a', 'b', 'c')]
     [string[]]$Letters,

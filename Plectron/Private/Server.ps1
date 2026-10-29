@@ -177,7 +177,7 @@ function Invoke-PlxApi {
     if ($resource -eq 'tools' -and $Method -eq 'GET') {
         if (-not $id) {
             $tools = @(Get-PlxTools -Root $State.Root -Cache $State.ToolCache | ForEach-Object { ConvertTo-PlxPublicTool $_ -Summary })
-            Send-PlxJson $Response (, $tools)
+            Send-PlxJson $Response $tools
             return
         }
         $tool = Find-PlxTool -Root $State.Root -Cache $State.ToolCache -Id $id
@@ -192,7 +192,7 @@ function Invoke-PlxApi {
                 $limit = 100
                 if ($Request.QueryString['limit']) { $limit = [int]$Request.QueryString['limit'] }
                 $runs = @(Get-PlxRuns -HistoryRoot $State.HistoryRoot -Limit $limit | ForEach-Object { Repair-PlxRunStatus -State $State -Meta $_ })
-                Send-PlxJson $Response (, $runs)
+                Send-PlxJson $Response $runs
                 return
             }
             if ($Method -eq 'POST') {

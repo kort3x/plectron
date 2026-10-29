@@ -2,15 +2,23 @@
 # project overrides and Include/Exclude applied. The server only runs tools
 # found here.
 
+# Changes whenever a file of a path-based module is added, removed or edited.
+# Installed modules (given by name) are described once per server session.
 function Get-PlxModuleStamp {
     param([string]$Module, [string]$Setup)
     $stamp = $Module
-    if (Test-Path -LiteralPath $Module -PathType Leaf) {
+    $dir = $null
+    if (Test-Path -LiteralPath $Module -PathType Leaf) { $dir = Split-Path $Module }
+    elseif (Test-Path -LiteralPath $Module -PathType Container) { $dir = $Module }
+    if ($dir) {
         $max = 0
-        foreach ($f in Get-ChildItem -LiteralPath (Split-Path $Module) -Recurse -File -Include '*.ps1', '*.psm1', '*.psd1', '*.dll') {
+        $count = 0
+        foreach ($f in Get-ChildItem -LiteralPath $dir -Recurse -File) {
+            if (@('.ps1', '.psm1', '.psd1', '.dll') -notcontains $f.Extension.ToLowerInvariant()) { continue }
+            $count++
             if ($f.LastWriteTimeUtc.Ticks -gt $max) { $max = $f.LastWriteTimeUtc.Ticks }
         }
-        $stamp = "$stamp/$max"
+        $stamp = "$stamp/$count/$max"
     }
     if ($Setup -and (Test-Path -LiteralPath $Setup)) { $stamp = "$stamp/$((Get-Item -LiteralPath $Setup).LastWriteTimeUtc.Ticks)" }
     return $stamp
@@ -78,13 +86,19 @@ function Get-PlxCatalog {
     foreach ($dir in $project.Scripts) { foreach ($t in @(Get-PlxTools -Root $dir -Cache $State.ToolCache -IncludeHidden)) { $all.Add($t) } }
     foreach ($m in $project.Modules) { foreach ($t in @(Get-PlxModuleTools -State $State -Module $m)) { $all.Add($t) } }
 
+    # Same-named scripts in different folders get numbered ids instead of hiding each other.
     $seen = @{}
     foreach ($tool in $all) {
-        if ($seen.ContainsKey($tool.id)) { continue }
-        $seen[$tool.id] = $true
+        $baseId = $tool.id -replace '~\d+$', ''
+        $n = 1
+        $id = $baseId
+        while ($seen.ContainsKey($id)) { $n++; $id = "$baseId~$n" }
+        $tool.id = $id
+        $seen[$id] = $true
         if ($project.Commands.ContainsKey($tool.name)) { Merge-PlxOverrides -Tool $tool -Data $project.Commands[$tool.name] }
         if (-not (Test-PlxToolSelected -Project $project -Tool $tool)) { continue }
-        if ($tool.hidden -and -not $IncludeHidden) { continue }
+        # Commands asked for by name (Show-Plectron) are shown even when marked hidden.
+        if ($tool.hidden -and -not $IncludeHidden -and -not $project.Single) { continue }
         $tool
     }
 }

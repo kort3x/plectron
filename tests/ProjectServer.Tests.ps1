@@ -17,6 +17,7 @@ Describe 'project server' {
         $info.title | Should -Be 'Fixture Ops'
         $info.accent | Should -Be '#ff0066'
         $info.logo | Should -BeTrue
+        $info.single | Should -BeFalse
     }
     It 'serves the project logo' {
         $r = Send GET '/api/logo'
@@ -47,8 +48,21 @@ Describe 'Show-Plectron' {
         $single = Get-Command Get-Inline | Show-Plectron -HistoryPath (Join-Path $TestDrive 'single') -NoBrowser -PassThru
         try {
             $single.Url | Should -Match '#/tool/fixturetools\.get-inline$'
+            $single.State.Project.Single | Should -BeTrue
             @(Get-PlxCatalog -State $single.State).Count | Should -Be 1
         } finally { Stop-Plectron -Server $single }
+    }
+    It 'shows an explicitly requested command even if it is hidden' {
+        $single = Get-Command Remove-Internal | Show-Plectron -HistoryPath (Join-Path $TestDrive 'hidden') -NoBrowser -PassThru
+        try { @(Get-PlxCatalog -State $single.State).id | Should -Be @('fixturetools.remove-internal') }
+        finally { Stop-Plectron -Server $single }
+    }
+    It 'does not use single-tool mode for a project that happens to have one tool' {
+        $one = Start-Plectron -Path (Join-Path $PSScriptRoot 'fixtures/dupes/a') -HistoryPath (Join-Path $TestDrive 'one') -NoBrowser -PassThru
+        try {
+            $one.Url | Should -Not -Match '#/tool/'
+            $one.State.Project.Single | Should -BeFalse
+        } finally { Stop-Plectron -Server $one }
     }
     It 'refuses commands that do not come from a module' {
         function Local-Thing { 'x' }

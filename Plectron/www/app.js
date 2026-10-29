@@ -49,7 +49,7 @@ async function route() {
   const host = h('div');
   try {
     let result;
-    const single = ctx.tools.length === 1 ? ctx.tools[0].id : null;
+    const single = ctx.info.single && ctx.tools.length === 1 ? ctx.tools[0].id : null;
     if (parts[0] === 'tool' && parts[1]) result = await toolView(host, parts[1], query, ctx);
     else if (single && parts[0] !== 'run' && parts[0] !== 'history') result = await toolView(host, single, query, ctx);
     else if (parts[0] === 'run' && parts[1]) result = await runView(host, parts[1], ctx);
@@ -122,7 +122,7 @@ async function start() {
     ctx.info = await api.info();
     applyBranding(ctx.info);
     await loadTools();
-    appEl.classList.toggle('single', ctx.tools.length === 1);
+    appEl.classList.toggle('single', !!ctx.info.single);
     const engine = (ctx.info.engine || '').split(/[\\/]/).pop();
     document.getElementById('sidebar-foot').textContent = `v${ctx.info.version} · ${engine} · ${ctx.info.root}`;
     document.getElementById('sidebar-foot').title = ctx.info.root;

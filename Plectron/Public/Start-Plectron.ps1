@@ -69,7 +69,7 @@ function Start-Plectron {
     $tools = @(Get-PlxCatalog -State $state)
     $handles = Start-PlxServer -State $state
     $url = "http://localhost:$Port/?t=$($state.Token)"
-    if ($tools.Count -eq 1) { $url += "#/tool/$($tools[0].id)" }
+    if ($project.Single -and $tools.Count -eq 1) { $url += "#/tool/$($tools[0].id)" }
     $server = [pscustomobject]@{
         PSTypeName = 'Plectron.Server'
         Url = $url; Port = $Port; Root = $state.Root; Title = $project.Title; Token = $state.Token

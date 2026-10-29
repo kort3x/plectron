@@ -43,6 +43,7 @@ function New-PlxProject {
         Modules = $moduleSpecs
         Scripts = @(foreach ($s in $Scripts) { & $resolve $s 'Scripts folder' -MustExist })
         Include = @($Include); Exclude = @($Exclude); Setup = $setupPath; Engine = $Engine; Commands = $Commands
+        Single = $false
     }
 }
 
@@ -88,11 +89,12 @@ function Resolve-PlxProject {
             $names.Add($info.Name)
         }
         $project = New-PlxProject -Root (Get-Location).Path -Modules $specs.ToArray() -Include $names.ToArray()
+        $project.Single = $true
     } elseif ($Path -or $Module) {
         $root = (Get-Location).Path
         if ($Path) { $root = $Path }
         $scripts = @()
-        if ($Path) { $scripts = @($Path) }
+        if ($Path) { $scripts = @('.') }  # relative to the root, which is $Path
         $project = New-PlxProject -Root $root -Scripts $scripts -Modules @($Module | Where-Object { $_ } | ForEach-Object {
                     if (Test-Path -LiteralPath $_) { (Resolve-Path -LiteralPath $_).Path } else { $_ } })
     } elseif (Test-Path -LiteralPath 'plectron.psd1') {

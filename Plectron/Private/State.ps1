@@ -10,7 +10,7 @@ function New-PlxState {
         [int]$HistoryLimit = 200
     )
     # -Root is shorthand for a project that only serves a scripts folder.
-    if (-not $Project) { $Project = New-PlxProject -Root $Root -Scripts @($Root) }
+    if (-not $Project) { $Project = New-PlxProject -Root $Root -Scripts @('.') }
     if (-not $Engine) { $Engine = $Project.Engine }
     if (-not $HistoryRoot) { $HistoryRoot = Get-PlxDefaultHistoryRoot -ProjectRoot $Project.Root }
     if (-not (Test-Path -LiteralPath $HistoryRoot)) { $null = New-Item -ItemType Directory -Path $HistoryRoot -Force }

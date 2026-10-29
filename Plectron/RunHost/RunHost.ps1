@@ -28,7 +28,11 @@ if ($job.secure) {
 $runner = @'
 param($__job, $__a)
 $global:LASTEXITCODE = 0
-if ($__job.setup) { . $__job.setup }
+if ($__job.setup) {
+    # Keep the setup's warnings, errors and messages in the run; drop its plain output.
+    . $__job.setup *>&1 | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] -or $_ -is [System.Management.Automation.WarningRecord] -or
+        $_ -is [System.Management.Automation.VerboseRecord] -or $_ -is [System.Management.Automation.DebugRecord] -or $_ -is [System.Management.Automation.InformationRecord] }
+}
 if ($__job.kind -eq 'command') {
     $__m = Import-Module $__job.module -PassThru -ErrorAction Stop | Select-Object -First 1
     & (Get-Command -Module $__m.Name -Name $__job.command -ErrorAction Stop) @__a *>&1

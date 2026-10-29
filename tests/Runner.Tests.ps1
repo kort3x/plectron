@@ -154,6 +154,8 @@ Describe 'command runs' {
         $out | Should -Contain 'setup:yes'
         $out | Should -Contain "cwd:$((Resolve-Path $projectDir).Path)"
         $out | Should -Contain 'secret:s'
+        $out | Should -Not -Contain 'setup-output'
+        (Get-Events $cstate $meta.id | Where-Object t -eq 'warning').data | Should -Contain 'setup-warning'
     }
     It 'binds the chosen parameter set' {
         $tool = Find-PlxCatalogTool -State $cstate -Id 'fixturetools.get-widget'

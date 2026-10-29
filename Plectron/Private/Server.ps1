@@ -193,6 +193,7 @@ function Invoke-PlxApi {
         Send-PlxJson $Response @{
             version = $version; engine = $engine; root = $State.Root; platform = [Environment]::OSVersion.Platform.ToString()
             title = $State.Project.Title; accent = $State.Project.Accent; logo = [bool]$State.Project.Logo
+            single = [bool]$State.Project.Single
         }
         return
     }

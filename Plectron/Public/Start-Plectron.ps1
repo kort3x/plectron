@@ -18,6 +18,8 @@ function Start-Plectron {
     Path to a plectron.psd1 project file.
     .PARAMETER Command
     Individual commands to serve (names or Get-Command results). See also Show-Plectron.
+    .PARAMETER Page
+    Custom page scripts (files that output a New-PlxPage) to serve.
     .PARAMETER Title
     Title shown in the UI. Overrides the project file.
     .PARAMETER Port
@@ -46,18 +48,22 @@ function Start-Plectron {
         [string[]]$Module,
         [string]$Config,
         [object[]]$Command,
+        [string[]]$Page,
         [string]$Title,
         [ValidateRange(0, 65535)][int]$Port = 0,
         [string]$Engine,
         [string]$HistoryPath,
         [ValidateRange(1, 100000)][int]$HistoryLimit = 200,
         [switch]$NoBrowser,
-        [switch]$PassThru
+        [switch]$PassThru,
+        # Used by Show-PlxPage: open straight on the one page.
+        [Parameter(DontShow)][switch]$Single
     )
     if ($Path -and -not (Test-Path -LiteralPath $Path -PathType Container)) { throw "Folder '$Path' does not exist." }
     if ($Engine) { $null = Resolve-PlxEngine -Preferred $Engine }
 
-    $project = Resolve-PlxProject -Path $Path -Module $Module -Config $Config -Command $Command -Title $Title
+    $project = Resolve-PlxProject -Path $Path -Module $Module -Config $Config -Command $Command -Page $Page -Title $Title
+    if ($Single) { $project.Single = $true }
     $state = New-PlxState -Project $project -HistoryRoot $HistoryPath -Engine $Engine -HistoryLimit $HistoryLimit
     Limit-PlxHistory -HistoryRoot $state.HistoryRoot -Keep $HistoryLimit
     if ($Port -eq 0) { $Port = Get-PlxFreePort }
@@ -67,9 +73,11 @@ function Start-Plectron {
 
     # Discover up front: warms the module cache and surfaces load errors early.
     $tools = @(Get-PlxCatalog -State $state)
+    $pages = @(Get-PlxPages -State $state)
     $handles = Start-PlxServer -State $state
     $url = "http://localhost:$Port/?t=$($state.Token)"
-    if ($project.Single -and $tools.Count -eq 1) { $url += "#/tool/$($tools[0].id)" }
+    if ($project.Single -and $tools.Count -eq 1 -and $pages.Count -eq 0) { $url += "#/tool/$($tools[0].id)" }
+    if ($project.Single -and $pages.Count -eq 1 -and $tools.Count -eq 0) { $url += "#/page/$($pages[0].id)" }
     $server = [pscustomobject]@{
         PSTypeName = 'Plectron.Server'
         Url = $url; Port = $Port; Root = $state.Root; Title = $project.Title; Token = $state.Token
@@ -81,7 +89,7 @@ function Start-Plectron {
     if (-not $NoBrowser) { Open-PlxBrowser -Url $url }
     if ($PassThru) { return $server }
 
-    Write-Host "$($project.Title) is serving $($tools.Count) tool(s) from $($state.Root)"
+    Write-Host "$($project.Title) is serving $($tools.Count) tool(s) and $($pages.Count) page(s) from $($state.Root)"
     Write-Host "Open $url" -ForegroundColor Cyan
     Write-Host 'Press Ctrl+C to stop.'
     try {
@@ -121,6 +129,35 @@ function Show-Plectron {
         foreach ($k in $PSBoundParameters.Keys) { if ($k -ne 'Command') { $options[$k] = $PSBoundParameters[$k] } }
         Start-Plectron -Command $all.ToArray() @options
     }
+}
+
+function Show-PlxPage {
+    <#
+    .SYNOPSIS
+    Open an ad-hoc custom page, defined right here, in the browser.
+    .DESCRIPTION
+    The scriptblock must output a New-PlxPage. It runs in its own page process,
+    so variables from this console are not available inside it.
+    .EXAMPLE
+    Show-PlxPage { New-PlxPage -Title 'Disks' { New-PlxTable -Name Drives -ScriptBlock { Get-PSDrive -PSProvider FileSystem } } }
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position = 0)][scriptblock]$Content,
+        [string]$Title = 'Page',
+        [ValidateRange(0, 65535)][int]$Port = 0,
+        [string]$Engine,
+        [string]$HistoryPath,
+        [switch]$NoBrowser,
+        [switch]$PassThru
+    )
+    $dir = Join-Path ([IO.Path]::GetTempPath()) "plectron-page-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $null = New-Item -ItemType Directory -Path $dir
+    $file = Join-Path $dir ((ConvertTo-PlxSlug $Title) + '.ps1')
+    [IO.File]::WriteAllText($file, $Content.ToString(), (New-Object System.Text.UTF8Encoding $false))
+    $options = @{}
+    foreach ($k in $PSBoundParameters.Keys) { if ($k -ne 'Content') { $options[$k] = $PSBoundParameters[$k] } }
+    Start-Plectron -Page $file -Single @options
 }
 
 function Open-PlxBrowser {

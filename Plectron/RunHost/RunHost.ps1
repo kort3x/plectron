@@ -5,6 +5,7 @@ param([Parameter(Mandatory)][string]$JobPath)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '../Private/Compat.ps1')
 . (Join-Path $PSScriptRoot '../Private/Protocol.ps1')
+. (Join-Path $PSScriptRoot '../Private/Streams.ps1')
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 
 $job = ConvertFrom-PlxJson (Get-Content -LiteralPath $JobPath -Raw -Encoding UTF8)
@@ -43,89 +44,15 @@ if ($__job.kind -eq 'command') {
 '@
 $ps = [powershell]::Create()
 $null = $ps.AddScript($runner).AddArgument($job).AddArgument($arguments)
-$output = New-Object 'System.Management.Automation.PSDataCollection[psobject]'
-$inputData = New-Object 'System.Management.Automation.PSDataCollection[psobject]'
-$inputData.Complete()
-
-$script:fatal = $null
-
-function Send-Record($item) {
-    $base = $item
-    if ($item -is [System.Management.Automation.PSObject]) { $base = $item.PSObject.BaseObject }
-    if ($base -is [System.Management.Automation.ErrorRecord]) {
-        $isBinding = $base.Exception -is [System.Management.Automation.ParameterBindingException]
-        if ($isBinding) { $script:fatal = $base.Exception.Message }
-        Write-PlxEvent 'error' (ConvertTo-PlxErrorData $base $isBinding)
-    } elseif ($base -is [System.Management.Automation.WarningRecord]) {
-        Write-PlxEvent 'warning' $base.Message
-    } elseif ($base -is [System.Management.Automation.VerboseRecord]) {
-        Write-PlxEvent 'verbose' $base.Message
-    } elseif ($base -is [System.Management.Automation.DebugRecord]) {
-        Write-PlxEvent 'debug' $base.Message
-    } elseif ($base -is [System.Management.Automation.InformationRecord]) {
-        $data = [ordered]@{ message = [string]$base.MessageData; tags = @($base.Tags); host = $false; fg = $null; bg = $null }
-        if ($base.MessageData -is [System.Management.Automation.HostInformationMessage]) {
-            $data.host = $true
-            $data.message = $base.MessageData.Message
-            if ($null -ne $base.MessageData.ForegroundColor) { $data.fg = [string]$base.MessageData.ForegroundColor }
-            if ($null -ne $base.MessageData.BackgroundColor) { $data.bg = [string]$base.MessageData.BackgroundColor }
-        }
-        Write-PlxEvent 'info' $data
-    } else {
-        $typeName = $null
-        if ($null -ne $item) { $typeName = @($item.PSObject.TypeNames)[0] }
-        $display = $null
-        $standard = $null
-        if ($null -ne $item) { $standard = $item.PSObject.Members['PSStandardMembers'] }
-        if ($standard -and $standard.Value.DefaultDisplayPropertySet) {
-            $display = @($standard.Value.DefaultDisplayPropertySet.ReferencedPropertyNames)
-        }
-        $value = $null
-        try { $value = ConvertTo-PlxValue $item } catch { $value = ($item | Out-String).Trim() }
-        Write-PlxEvent 'output' $value @{ type = $typeName; display = $display }
-    }
-}
-
-function Send-Progress($p) {
-    Write-PlxEvent 'progress' ([ordered]@{
-            id = $p.ActivityId; parentId = $p.ParentActivityId; activity = $p.Activity
-            status = $p.StatusDescription; operation = $p.CurrentOperation
-            percent = $p.PercentComplete; secondsRemaining = $p.SecondsRemaining
-            completed = ($p.RecordType -eq [System.Management.Automation.ProgressRecordType]::Completed)
-        })
-}
-
-function Receive-Streams {
-    foreach ($item in $output.ReadAll()) { Send-Record $item }
-    foreach ($item in $ps.Streams.Error.ReadAll()) { Send-Record $item }
-    foreach ($p in $ps.Streams.Progress.ReadAll()) { Send-Progress $p }
-}
-
-$handle = $ps.BeginInvoke($inputData, $output)
-while (-not $handle.IsCompleted) {
-    Receive-Streams
-    Start-Sleep -Milliseconds 25
-}
-try { $ps.EndInvoke($handle) } catch { $null = $_ }
-Receive-Streams
+$result = Invoke-PlxStreamed -PowerShell $ps
 
 $exitCode = 0
 $exitValue = $ps.Runspace.SessionStateProxy.GetVariable('LASTEXITCODE')
 if ($null -ne $exitValue) { $exitCode = [int]$exitValue }
 
-$state = $ps.InvocationStateInfo
-if ($state.State -eq [System.Management.Automation.PSInvocationState]::Failed) {
-    $reason = $state.Reason
-    $record = $null
-    if ($reason -is [System.Management.Automation.IContainsErrorRecord]) { $record = $reason.ErrorRecord }
-    if ($record) { Write-PlxEvent 'error' (ConvertTo-PlxErrorData $record $true) }
-    else { Write-PlxEvent 'error' ([ordered]@{ message = $reason.Message; terminating = $true }) }
-    $script:fatal = $reason.Message
-}
-
-$status = 'succeeded'
-if ($script:fatal -or $exitCode -ne 0) { $status = 'failed' }
-if ($exitCode -eq 0 -and $script:fatal) { $exitCode = 1 }
-Write-PlxEvent 'exit' ([ordered]@{ status = $status; exitCode = $exitCode; error = $script:fatal })
+$status = $result.status
+if ($exitCode -ne 0) { $status = 'failed' }
+if ($exitCode -eq 0 -and $status -eq 'failed') { $exitCode = 1 }
+Write-PlxEvent 'exit' ([ordered]@{ status = $status; exitCode = $exitCode; error = $result.error })
 $ps.Dispose()
 exit $exitCode

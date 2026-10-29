@@ -24,6 +24,10 @@ function New-PlxState {
             Runs = [hashtable]::Synchronized(@{})
             ToolCache = [hashtable]::Synchronized(@{})
             CommandCache = [hashtable]::Synchronized(@{})
+            Sessions = [hashtable]::Synchronized(@{})
+            ClosedSessions = [hashtable]::Synchronized(@{})
+            SessionRoot = Join-Path ([IO.Path]::GetTempPath()) "plectron-sessions-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+            SessionIdleSeconds = 120
             CorePath = Join-Path $PSScriptRoot 'Plectron.Core.psm1'
             RunHostPath = Join-Path (Join-Path $moduleRoot 'RunHost') 'RunHost.ps1'
             WwwRoot = Join-Path $moduleRoot 'www'

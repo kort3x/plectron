@@ -1,7 +1,7 @@
 # A project: what Plectron exposes and how it looks. Comes from plectron.psd1
 # at a project root, or is assembled from Start-Plectron's parameters.
 
-$script:PlxProjectKeys = @('Title', 'Logo', 'Accent', 'Modules', 'Scripts', 'Include', 'Exclude', 'Setup', 'Engine', 'Commands')
+$script:PlxProjectKeys = @('Title', 'Logo', 'Accent', 'Modules', 'Scripts', 'Pages', 'Include', 'Exclude', 'Setup', 'Engine', 'Commands')
 
 function New-PlxProject {
     param(
@@ -11,6 +11,8 @@ function New-PlxProject {
         [string]$Accent,
         [string[]]$Modules = @(),
         [string[]]$Scripts = @(),
+        [string[]]$Pages = @(),
+        [string[]]$PageFiles = @(),
         [string[]]$Include = @('*'),
         [string[]]$Exclude = @(),
         [string]$Setup,
@@ -42,6 +44,8 @@ function New-PlxProject {
         Root = $rootPath; Title = $Title; Logo = $logoPath; Accent = $Accent
         Modules = $moduleSpecs
         Scripts = @(foreach ($s in $Scripts) { & $resolve $s 'Scripts folder' -MustExist })
+        Pages = @(foreach ($p in $Pages) { & $resolve $p 'Pages folder' -MustExist })
+        PageFiles = @(foreach ($p in $PageFiles) { & $resolve $p 'Page' -MustExist })
         Include = @($Include); Exclude = @($Exclude); Setup = $setupPath; Engine = $Engine; Commands = $Commands
         Single = $false
     }
@@ -72,7 +76,7 @@ function Get-PlxModuleSpec {
 # Decide what to serve from Start-Plectron's parameters:
 #   -Config file > -Path with a plectron.psd1 > -Path/-Module/-Command > ./plectron.psd1 > current folder.
 function Resolve-PlxProject {
-    param([string]$Path, [string[]]$Module, [string]$Config, [object[]]$Command, [string]$Title)
+    param([string]$Path, [string[]]$Module, [string]$Config, [object[]]$Command, [string[]]$Page, [string]$Title)
     $project = $null
     if ($Config) { $project = Read-PlxProjectConfig -Path $Config }
     elseif ($Path -and (Test-Path -LiteralPath (Join-Path $Path 'plectron.psd1'))) { $project = Read-PlxProjectConfig -Path (Join-Path $Path 'plectron.psd1') }
@@ -90,17 +94,22 @@ function Resolve-PlxProject {
         }
         $project = New-PlxProject -Root (Get-Location).Path -Modules $specs.ToArray() -Include $names.ToArray()
         $project.Single = $true
-    } elseif ($Path -or $Module) {
+    } elseif ($Path -or $Module -or $Page) {
         $root = (Get-Location).Path
         if ($Path) { $root = $Path }
         $scripts = @()
+        $pageDirs = @()
         if ($Path) { $scripts = @('.') }  # relative to the root, which is $Path
-        $project = New-PlxProject -Root $root -Scripts $scripts -Modules @($Module | Where-Object { $_ } | ForEach-Object {
+        if ($Path -and (Test-Path -LiteralPath (Join-Path $Path 'pages') -PathType Container)) { $pageDirs = @('./pages') }
+        $project = New-PlxProject -Root $root -Scripts $scripts -Pages $pageDirs -Modules @($Module | Where-Object { $_ } | ForEach-Object {
                     if (Test-Path -LiteralPath $_) { (Resolve-Path -LiteralPath $_).Path } else { $_ } })
     } elseif (Test-Path -LiteralPath 'plectron.psd1') {
         $project = Read-PlxProjectConfig -Path 'plectron.psd1'
     } else {
         $project = New-PlxProject -Root (Get-Location).Path -Scripts @('.')
+    }
+    if ($Page) {
+        $project.PageFiles = @($project.PageFiles) + @(foreach ($p in $Page) { (Resolve-Path -LiteralPath $p -ErrorAction Stop).Path })
     }
     if ($Title) { $project.Title = $Title }
     return $project

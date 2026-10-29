@@ -113,9 +113,7 @@ function Start-PlxRun {
     }
     Write-PlxPrivateFile -Path $jobPath -Content (ConvertTo-PlxJson $payload)
 
-    $policy = ''
-    if (Test-PlxWindows) { $policy = '-ExecutionPolicy Bypass ' }
-    $arguments = "-NoProfile -NonInteractive $policy-File `"$($State.RunHostPath)`" -JobPath `"$jobPath`""
+    $arguments = Get-PlxHostArguments -Script $State.RunHostPath -JobPath $jobPath
 
     $entry = [hashtable]::Synchronized(@{ Done = $false; Cancelled = $false; Process = $null; Status = 'running'; PowerShell = $null; Handle = $null })
     $State.Runs[$id] = $entry
@@ -133,54 +131,20 @@ function Start-PlxRun {
     return $meta
 }
 
-function Add-PlxEventLine {
-    param($Writer, [string]$Type, $Data)
-    $e = [ordered]@{ t = $Type; ts = [DateTime]::UtcNow.ToString('o', [Globalization.CultureInfo]::InvariantCulture); data = $Data }
-    $Writer.WriteLine((ConvertTo-PlxJson $e))
-}
-
 # Runs in a background runspace for the lifetime of one child process.
 function Invoke-PlxRunPump {
     param($Entry, [string]$RunDir, [string]$Exe, [string]$Arguments, [string]$JobPath, [string]$WorkingDirectory)
 
     $started = [DateTime]::UtcNow
-    $share = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
-    $fs = New-Object IO.FileStream ((Join-Path $RunDir 'events.ndjson'), [IO.FileMode]::Append, [IO.FileAccess]::Write, $share)
-    $writer = New-Object IO.StreamWriter ($fs, (New-Object System.Text.UTF8Encoding $false))
-    $writer.AutoFlush = $true
-    $sentinel = Get-PlxSentinel
+    $writer = Open-PlxEventWriter -Path (Join-Path $RunDir 'events.ndjson')
     $childExit = $null
     $exitCode = $null
     try {
-        $psi = New-Object Diagnostics.ProcessStartInfo
-        $psi.FileName = $Exe
-        $psi.Arguments = $Arguments
-        $psi.WorkingDirectory = $WorkingDirectory
-        $psi.UseShellExecute = $false
-        $psi.CreateNoWindow = $true
-        $psi.RedirectStandardInput = $true
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-        $psi.StandardOutputEncoding = New-Object System.Text.UTF8Encoding $false
-        $psi.StandardErrorEncoding = New-Object System.Text.UTF8Encoding $false
-        $proc = [Diagnostics.Process]::Start($psi)
-        $Entry.Process = $proc
-        $proc.StandardInput.Close()
-        $stderrTask = $proc.StandardError.ReadToEndAsync()
-
-        while ($null -ne ($line = $proc.StandardOutput.ReadLine())) {
-            if ($line.StartsWith($sentinel)) {
-                $json = $line.Substring($sentinel.Length)
-                if ($json.StartsWith('{"t":"exit"')) { $childExit = (ConvertFrom-PlxJson $json).data }
-                $writer.WriteLine($json)
-            } else {
-                Add-PlxEventLine $writer 'raw' $line
-            }
-        }
-        $proc.WaitForExit()
-        $stderr = $stderrTask.Result
-        if ($stderr -and $stderr.Trim()) { Add-PlxEventLine $writer 'stderr' $stderr.TrimEnd() }
-        $exitCode = $proc.ExitCode
+        $child = Start-PlxChildProcess -Exe $Exe -Arguments $Arguments -WorkingDirectory $WorkingDirectory
+        $Entry.Process = $child.Process
+        $child.Stdin.Close()
+        $childExit = Copy-PlxChildEvents -Process $child.Process -Writer $writer
+        $exitCode = $child.Process.ExitCode
     } catch {
         Add-PlxEventLine $writer 'error' @{ message = "Failed to run: $($_.Exception.Message)"; terminating = $true }
     } finally {

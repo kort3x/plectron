@@ -83,7 +83,11 @@ function Get-PlxCatalog {
     param([Parameter(Mandatory)][hashtable]$State, [switch]$IncludeHidden)
     $project = $State.Project
     $all = New-Object System.Collections.Generic.List[object]
-    foreach ($dir in $project.Scripts) { foreach ($t in @(Get-PlxTools -Root $dir -Cache $State.ToolCache -IncludeHidden)) { $all.Add($t) } }
+    foreach ($dir in $project.Scripts) {
+        foreach ($t in @(Get-PlxTools -Root $dir -Cache $State.ToolCache -IncludeHidden)) {
+            if (-not (Test-PlxInPageFolder -Project $project -Path $t.path)) { $all.Add($t) }
+        }
+    }
     foreach ($m in $project.Modules) { foreach ($t in @(Get-PlxModuleTools -State $State -Module $m)) { $all.Add($t) } }
 
     # Same-named scripts in different folders get numbered ids instead of hiding each other.

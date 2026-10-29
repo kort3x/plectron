@@ -32,6 +32,8 @@ function ConvertFrom-PlxJson {
     # like 5.1 does (-DateKind String on 7.5+, re-formatting on older 7.x).
     if ($script:PlxJsonDateKind) { $obj = ConvertFrom-Json -InputObject $Json -DateKind String }
     else { $obj = ConvertFrom-Json -InputObject $Json }
+    # PowerShell 7 unrolls a one-element top-level array; restore it.
+    if ($Json.TrimStart().StartsWith('[') -and $obj -isnot [array]) { $obj = @($obj) }
     return , (ConvertTo-PlxHashtable $obj)
 }
 

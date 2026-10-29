@@ -19,6 +19,11 @@ Describe 'ConvertFrom-PlxJson' {
         $r.d | Should -BeOfType [string]
         $r.d | Should -Match '^2025-12-01T10:00:00'
     }
+    It 'keeps a top-level single-element array as an array' {
+        $r = ConvertFrom-PlxJson '[{"id":"a"}]'
+        , $r | Should -BeOfType [object[]]
+        $r[0].id | Should -Be 'a'
+    }
     It 'keeps single-element arrays as arrays' {
         $r = ConvertFrom-PlxJson '{"d":["only"]}'
         , $r.d | Should -BeOfType [object[]]

@@ -30,3 +30,33 @@ function Read-Sse([string]$Id) {
     [pscustomobject]@{ ContentType = $res.Content.Headers.ContentType.MediaType; Events = $events.ToArray() }
 }
 $script:base = "http://localhost:$($server.Port)"
+
+# An SSE connection that stays open; read from it with Read-SseUntil.
+function Open-Sse([string]$Path) {
+    $req = New-Object System.Net.Http.HttpRequestMessage ([System.Net.Http.HttpMethod]::Get, "$base$Path")
+    $req.Headers.Add('X-Plectron-Token', $server.Token)
+    $res = $client.SendAsync($req, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+    $stream = $res.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+    [pscustomobject]@{ Status = [int]$res.StatusCode; Reader = (New-Object IO.StreamReader ($stream)); Pending = $null; Response = $res }
+}
+
+# Reads events until $Until returns true for one of them (or the stream ends); returns the events read.
+function Read-SseUntil($Sse, [scriptblock]$Until, [int]$TimeoutSec = 30) {
+    $events = New-Object System.Collections.Generic.List[object]
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if (-not $Sse.Pending) { $Sse.Pending = $Sse.Reader.ReadLineAsync() }
+        $left = [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds
+        if (-not $Sse.Pending.Wait([Math]::Max(1, $left))) { break }
+        $line = $Sse.Pending.Result
+        $Sse.Pending = $null
+        if ($null -eq $line) { return $events.ToArray() }
+        if (-not $line.StartsWith('data: ')) { continue }
+        $e = ConvertFrom-PlxJson $line.Substring(6)
+        $events.Add($e)
+        if (& $Until $e) { return $events.ToArray() }
+    }
+    throw "Timed out after $TimeoutSec s. Got: $(($events | ForEach-Object { $_.t }) -join ', ')"
+}
+
+function Close-Sse($Sse) { $Sse.Reader.Dispose(); $Sse.Response.Dispose() }
